@@ -10,6 +10,9 @@ TMP=$(mktemp)
 cp "$DIR/custom/config.plist" "$TMP"
 export CLOVER_CONFIG="$TMP"
 export CLOVER_CTL_ALLOW_NONROOT=1
+EFI=$(mktemp -d)
+export CLOVER_EFI_PATH="$EFI"
+mkdir -p "$EFI/clover/themes"
 
 fail=0
 expect() { # description actual expected
@@ -60,6 +63,24 @@ case "$status" in
 	*) expect "status JSON reflects writes" "$status" "<json with resolution+theme>" ;;
 esac
 
+# theme install/remove — offline paths only (sanitize, 5-theme cap, active-theme guard)
+bash "$CTL" install-theme "evil/path" > /dev/null 2>&1; expect "install-theme rejects slash" "$?" "1"
+
+mkdir -p "$EFI/clover/themes/"{A,B,C,D,E}
+bash "$CTL" install-theme NewOne > /dev/null 2>&1; expect "install-theme enforces 5-theme cap" "$?" "1"
+rm -rf "$EFI/clover/themes/"{A,B,C,D,E}
+
+bash "$CTL" set-theme Eclipse > /dev/null
+mkdir -p "$EFI/clover/themes/Eclipse"
+bash "$CTL" remove-theme Eclipse > /dev/null 2>&1; expect "remove-theme refuses active theme" "$?" "1"
+
+mkdir -p "$EFI/clover/themes/Mojave"
+bash "$CTL" remove-theme Mojave > /dev/null 2>&1; expect "remove-theme exit 0 for inactive theme" "$?" "0"
+expect "remove-theme deleted the dir" "$([ -d "$EFI/clover/themes/Mojave" ] && echo yes || echo no)" "no"
+
+bash "$CTL" remove-theme "../etc" > /dev/null 2>&1; expect "remove-theme rejects traversal" "$?" "1"
+
+rm -rf "$EFI"
 rm -f "$TMP" "$TMP.cloverctl.tmp"
 echo "---"
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi
