@@ -106,7 +106,12 @@ else
 		echo Could not auto-detect the resolution - the Clover default 1280x800 will be used.
 		echo You can change it later from the Clover Toolbox.
 	fi
-	read -p "Proceed in generic handheld mode? (y/N): " GENERIC_CONFIRM
+	if [ "${CLOVER_NONINTERACTIVE:-}" = 1 ]
+	then
+		GENERIC_CONFIRM=y
+	else
+		read -p "Proceed in generic handheld mode? (y/N): " GENERIC_CONFIRM
+	fi
 	if [ "$GENERIC_CONFIRM" != "y" ] && [ "$GENERIC_CONFIRM" != "Y" ]
 	then
 		echo Aborting at user request.
@@ -153,7 +158,18 @@ else
 	echo Dual boot configuration supported.
 fi
 
-if [ "$(passwd --status $(whoami) | tr -s " " | cut -d " " -f 2)" == "P" ]
+if [ -n "${CLOVER_SUDO_PASS:-}" ]
+then
+	current_password="$CLOVER_SUDO_PASS"
+	echo -e "$current_password\n" | sudo -S ls &> /dev/null
+	if [ $? -eq 0 ]
+	then
+		echo Sudo password is good!
+	else
+		echo Sudo password is wrong! Exiting.
+		exit
+	fi
+elif [ "$(passwd --status $(whoami) | tr -s " " | cut -d " " -f 2)" == "P" ]
 then
 	read -s -p "Please enter current sudo password: " current_password ; echo
 	echo Checking if the sudo password is correct.
