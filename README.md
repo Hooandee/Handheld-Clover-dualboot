@@ -65,7 +65,7 @@ Boot to Windows and open an elevated Command Prompt or PowerShell, then run:
 > ⚡ **Easy install (SteamOS & Bazzite)** - boot into Desktop Mode, open a terminal (konsole), and paste this single command:
 >
 > ```bash
-> cd ~ && rm -rf Handheld-Clover-dualboot && git clone https://github.com/Hooandee/Handheld-Clover-dualboot && cd Handheld-Clover-dualboot && chmod +x install-Clover.sh && ./install-Clover.sh
+> cd ~ && rm -rf Handheld-Clover-dualboot && git clone https://github.com/Hooandee/Handheld-Clover-dualboot && cd Handheld-Clover-dualboot && chmod +x install-clover.sh && ./install-clover.sh
 > ```
 >
 > It removes any old copy, clones this repo, and runs the installer in one step. Prefer to do it by hand? Use the numbered steps below.
@@ -94,10 +94,10 @@ Boot to Windows and open an elevated Command Prompt or PowerShell, then run:
    cd ~/Handheld-Clover-dualboot
    ```
    ```cmd
-   chmod +x install-Clover.sh
+   chmod +x install-clover.sh
    ```
    ```cmd
-   ./install-Clover.sh
+   ./install-clover.sh
    ```
    
      ![image](https://github.com/user-attachments/assets/043d8e7c-9d57-48b2-a1ad-f93c94cf3e9f)
