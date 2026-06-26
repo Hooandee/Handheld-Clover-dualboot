@@ -351,6 +351,23 @@ class CloverWindow(QMainWindow):
         if label is not None:
             label.setStyleSheet("color: #3fbf6a;" if good else "color: #e0a83e;")
 
+    def _load_pixmap(self, path):
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            return pixmap
+        # fallback for formats Qt's plugins miss (e.g. some .icns) via Pillow
+        try:
+            import tempfile
+            from PIL import Image
+            fd, tmp = tempfile.mkstemp(suffix=".png")
+            os.close(fd)
+            Image.open(path).convert("RGBA").save(tmp)
+            pixmap = QPixmap(tmp)
+            os.remove(tmp)
+            return pixmap
+        except Exception:
+            return QPixmap()
+
     def _update_theme_preview(self, name):
         if not name:
             return
@@ -364,7 +381,7 @@ class CloverWindow(QMainWindow):
                 bg = path
             elif kind == "icon":
                 icons.append(path)
-        bgmap = QPixmap(bg) if bg else QPixmap()
+        bgmap = self._load_pixmap(bg) if bg else QPixmap()
         if not bgmap.isNull():
             self.theme_preview.setPixmap(bgmap.scaledToWidth(380, Qt.TransformationMode.SmoothTransformation))
         else:
@@ -378,7 +395,7 @@ class CloverWindow(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
         for path in icons[:10]:
-            pixmap = QPixmap(path)
+            pixmap = self._load_pixmap(path)
             if pixmap.isNull():
                 continue
             label = QLabel()

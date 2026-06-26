@@ -322,10 +322,10 @@ theme-preview)
 	then
 		cp "$dir/$bg" "$tmp/" 2> /dev/null && chmod 644 "$tmp/$bg" && printf 'background\t%s\n' "$tmp/$bg"
 	fi
-	# theme icons (PNG only - Qt cannot render .icns); prefer an icons/ subfolder
+	# theme icons (prefer an icons/ subfolder); .icns is rendered by the app
 	icondir="$dir"
 	[ -d "$dir/icons" ] && icondir="$dir/icons"
-	ls "$icondir" 2> /dev/null | grep -iE '^(os_|func_|vol_|tool_|pointer|selection|radio_)' | grep -iE '\.png$' | head -n 12 | while read -r f
+	ls "$icondir" 2> /dev/null | grep -iE '^(os_|func_|vol_|tool_|pointer|selection|radio_)' | grep -iE '\.(png|icns|jpg|jpeg)$' | head -n 12 | while read -r f
 	do
 		cp "$icondir/$f" "$tmp/$f" 2> /dev/null && chmod 644 "$tmp/$f" && printf 'icon\t%s\n' "$tmp/$f"
 	done

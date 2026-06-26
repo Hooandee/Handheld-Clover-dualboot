@@ -14,7 +14,10 @@ then
 	echo "First run: preparing the UI environment (downloads PySide6, one time)..."
 	python3 -m venv "$VENV"
 	"$VENV/bin/pip" install --upgrade pip > /dev/null
-	"$VENV/bin/pip" install PySide6 || { echo "Could not install PySide6 - is there network access?"; exit 1; }
+	"$VENV/bin/pip" install PySide6 pillow || { echo "Could not install PySide6 - is there network access?"; exit 1; }
 fi
+
+# ensure Pillow is present (renders .icns theme icons); covers venvs made before it was added
+"$PY" -c "import PIL" 2> /dev/null || "$VENV/bin/pip" install pillow > /dev/null 2>&1 || true
 
 exec "$PY" "$HERE/clover_desktop.py" "$@"
