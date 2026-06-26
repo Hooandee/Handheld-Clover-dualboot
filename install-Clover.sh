@@ -21,23 +21,62 @@ CLOVER_EFI=\\EFI\\clover\\cloverx64.efi
 BOARD_NAME=$(cat /sys/class/dmi/id/board_name)
 PRODUCT_NAME=$(cat /sys/class/dmi/id/product_name)
 
+# every supported handheld except the Steam Deck needs the XBOX 360 controller
+# UEFI driver so its built-in gamepad works inside the Clover boot menu
+XPAD_DRIVER=yes
+
+# helper - write a screen resolution (eg 1920x1080) into the Clover config.plist
+set_resolution() {
+	sed -i '/<key>ScreenResolution<\/key>/!b;n;c\\t\t<string>'"$1"'<\/string>' custom/config.plist
+}
+
+# helper - detect the internal panel native resolution from the kernel (works
+# without a display server). Handheld panels are frequently mounted rotated, so
+# the result is normalized to landscape (width >= height) which is what Clover wants.
+detect_native_resolution() {
+	local modes res w h
+	for modes in /sys/class/drm/*eDP*/modes /sys/class/drm/*DSI*/modes /sys/class/drm/*LVDS*/modes
+	do
+		[ -f "$modes" ] || continue
+		res=$(head -n1 "$modes" 2> /dev/null)
+		case "$res" in
+			*x*) ;;
+			*) continue ;;
+		esac
+		w=${res%%x*}
+		h=${res##*x}
+		case "$w$h" in
+			*[!0-9]*) continue ;;
+		esac
+		if [ "$h" -gt "$w" ]
+		then
+			echo "${h}x${w}"
+		else
+			echo "${w}x${h}"
+		fi
+		return 0
+	done
+	return 1
+}
+
 # check if running on Steam Deck OLED or LCD
 if [ "$BOARD_NAME"  = "Jupiter" ] || [ "$BOARD_NAME" = "Galileo" ] 
 then
 	echo Script is running on supported model - Steam Deck $BOARD_NAME.
 	echo No further edits needed to the config.plist.
+	XPAD_DRIVER=no
 
 # check if running on Lenovo Legion GO S
 elif [ "$PRODUCT_NAME" = "83L3" ] || [ "$PRODUCT_NAME" = "83Q2" ] || [ "$PRODUCT_NAME" = "83Q3" ]
 then
-	echo Script is running on supported model - Legion Go S $PRDUCT_NAME.
+	echo Script is running on supported model - Legion Go S $PRODUCT_NAME.
 	echo Creating config specific for Legion Go S.
-	sed -i '/<key>ScreenResolution<\/key>/!b;n;c\\t\t<string>1920x1200<\/string>' custom/config.plist
+	set_resolution 1920x1200
 
 # check if running on Lenovo Legion GO S 83N6 (this doesnt work in XBOX 360 UEFI driver so block it)
 elif [ "$PRODUCT_NAME" = "83N6" ]
 then
-	echo Script is running on unsupported model - Legion Go S $PRDUCT_NAME.
+	echo Script is running on unsupported model - Legion Go S $PRODUCT_NAME.
 	echo Unsupported device! Exiting immediately.
 	exit
 
@@ -46,30 +85,78 @@ elif [ "$PRODUCT_NAME" = "83E1" ]
 then
 	echo Script is running on supported model - Legion Go $PRODUCT_NAME.
 	echo Creating config specific for Legion Go.
-	sed -i '/<key>ScreenResolution<\/key>/!b;n;c\\t\t<string>2560x1600<\/string>' custom/config.plist
+	set_resolution 2560x1600
+
+# check if running on Lenovo Legion Go 2
+elif [ "$PRODUCT_NAME" = "83N0" ] || [ "$PRODUCT_NAME" = "83N1" ]
+then
+	echo Script is running on supported model - Legion Go 2 $PRODUCT_NAME.
+	echo Creating config specific for Legion Go 2.
+	set_resolution 1920x1200
 
 # check if running on Asus ROG Ally
 elif [ "$BOARD_NAME" = "RC71L" ]
 then
 	echo Script is running on supported model - Asus ROG Ally $BOARD_NAME.
 	echo Creating config specific for Asus ROG Ally.
-	sed -i '/<key>ScreenResolution<\/key>/!b;n;c\\t\t<string>1920x1080<\/string>' custom/config.plist
+	set_resolution 1920x1080
 
 # check if running on Asus ROG Ally X
 elif [ "$BOARD_NAME" = "RC72LA" ]
 then
 	echo Script is running on supported model - Asus ROG Ally X $BOARD_NAME.
 	echo Creating config specific for Asus ROG Ally X.
-	sed -i '/<key>ScreenResolution<\/key>/!b;n;c\\t\t<string>1920x1080<\/string>' custom/config.plist
+	set_resolution 1920x1080
+
+# check if running on Asus ROG Xbox Ally
+elif [ "$BOARD_NAME" = "RC73YA" ]
+then
+	echo Script is running on supported model - Asus ROG Xbox Ally $BOARD_NAME.
+	echo Creating config specific for Asus ROG Xbox Ally.
+	set_resolution 1920x1080
+
+# check if running on Asus ROG Xbox Ally X
+elif [ "$BOARD_NAME" = "RC73XA" ]
+then
+	echo Script is running on supported model - Asus ROG Xbox Ally X $BOARD_NAME.
+	echo Creating config specific for Asus ROG Xbox Ally X.
+	set_resolution 1920x1080
+
 # check if running on Onexplayer 2 Pro
 elif [ "$PRODUCT_NAME" = "ONEXPLAYER 2 PRO ARP23P" ]
 then
 	echo Script is running on supported model - Onexplayer 2 Pro $PRODUCT_NAME.
 	echo Creating config specific for Onexplayer 2 Pro.
-	sed -i '/<key>ScreenResolution<\/key>/!b;n;c\\t\t<string>2560x1600<\/string>' custom/config.plist
+	set_resolution 2560x1600
+
+# unknown device - fall back to generic handheld mode (experimental)
 else
-	echo Unsupported device! Exiting immediately.
-	exit
+	echo ----------------------------------------------------------------------
+	echo This device is not in the tested list:
+	echo "    board_name   : $BOARD_NAME"
+	echo "    product_name : $PRODUCT_NAME"
+	echo ----------------------------------------------------------------------
+	echo Clover can still be installed in generic handheld mode.
+	echo Only continue if this is an x86 handheld / mini PC that you want to dual boot.
+	AUTO_RES=$(detect_native_resolution)
+	if [ -n "$AUTO_RES" ]
+	then
+		echo Auto-detected native screen resolution: $AUTO_RES
+	else
+		echo Could not auto-detect the resolution - the Clover default 1280x800 will be used.
+		echo You can change it later from the Clover Toolbox.
+	fi
+	read -p "Proceed in generic handheld mode? (y/N): " GENERIC_CONFIRM
+	if [ "$GENERIC_CONFIRM" != "y" ] && [ "$GENERIC_CONFIRM" != "Y" ]
+	then
+		echo Aborting at user request.
+		exit
+	fi
+	if [ -n "$AUTO_RES" ]
+	then
+		echo Creating config for generic handheld using $AUTO_RES.
+		set_resolution "$AUTO_RES"
+	fi
 fi
 
 # check if Bazzite or SteamOS
@@ -217,18 +304,11 @@ echo -e "$current_password\n" | sudo -S cp custom/config.plist $EFI_PATH/clover/
 echo -e "$current_password\n" | sudo -S cp -Rf custom/themes/* $EFI_PATH/clover/themes
 echo -e "$current_password\n" | sudo -S rm -rf $EFI_PATH/clover/themes/{bgm,cesium,christmas,glass,purple_swirl,theme-sample.plist}
 
-# copy XBOX 360 UEFI driver if running on Legion Go, Legion Go S, ROG Ally or ROG Ally X
-if [ "$PRODUCT_NAME" = "83N6" ] || \
-	[ "$PRODUCT_NAME" = "83L3" ] || \
-	[ "$PRODUCT_NAME" = "83Q2" ] || \
-	[ "$PRODUCT_NAME" = "83Q3" ] || \
-	[ "$PRODUCT_NAME" = "83E1" ] || \
-	[ "$BOARD_NAME" = "RC71L" ] || \
-	[ "$BOARD_NAME" = "RC72LA" ] || \
-	[ "$PRODUCT_NAME" = "ONEXPLAYER 2 PRO ARP23P" ]
+# copy the XBOX 360 controller UEFI driver for every handheld except the Steam Deck
+# (the Steam Deck's built-in controller already works in Clover without it)
+if [ "$XPAD_DRIVER" = "yes" ]
 then
-	echo Script is running on Legion Go, Legion Go S, ROG Ally or ROG Ally X.
-	echo Installing XBOX 360 UEFI driver.
+	echo Installing XBOX 360 controller UEFI driver so the built-in gamepad works in Clover.
 	echo -e "$current_password\n" | sudo -S cp custom/UsbXbox360Dxe.efi $EFI_PATH/clover/drivers/uefi
 	if [ $? -eq 0 ]
 	then

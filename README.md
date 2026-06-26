@@ -10,6 +10,11 @@ A collection of tools that is packaged into an easy to use script that is stream
 * XBOX 360 Controller UEFI driver by [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) / [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe) to allow the built-in controller of ROG Ally / Legion Go (and other handhelds / USB controllers) work in Clover and other bootloaders! I've also tested my Logitech F710 it works on this XBOX 360 Conbtroller UEFI driver!
 * [chris1111](https://github.com/chris1111/) for the modified Eclipse theme.
 
+## What's New as of Jun 26 2026
+* added support for the **Lenovo Legion Go 2** (83N0 / 83N1), **ROG Xbox Ally** (RC73YA) and **ROG Xbox Ally X** (RC73XA)
+* **generic handheld mode** - handhelds that are not in the tested list are no longer rejected. The script auto-detects the panel's native resolution from the kernel and offers to continue, so most x86 handhelds work out of the box
+* easier install - a single copy/paste command for both SteamOS and Bazzite (see Quick Install Steps below)
+
 ## What's New as of Feb 19 2026
 * updated to Clover 5169
 * blocked Legion Go S as the XBOX 360 UEFI driver is not compatible with it (feel free to test / poke around)
@@ -212,28 +217,37 @@ Perform some Windows config first! Boot to Windows and open elevated command pro
    ```
 
 Once done, boot to SteamOS to install Clover!
-1. Boot into SteamOS, then go into Desktop Mode and open a konsole terminal.<br>
+
+> ⚡ **Easy install (SteamOS & Bazzite)** - boot into Desktop Mode, open a terminal (konsole), and paste this single command:
+>
+> ```bash
+> cd ~ && rm -rf Handheld-Clover-dualboot && git clone https://github.com/Hooandee/Handheld-Clover-dualboot && cd Handheld-Clover-dualboot && chmod +x install-Clover.sh && ./install-Clover.sh
+> ```
+>
+> It removes any old copy, clones this repo, and runs the installer in one step. Prefer to do it by hand? Use the numbered steps below.
+
+1. Boot into SteamOS / Bazzite, then go into Desktop Mode and open a terminal (konsole).<br>
 2. Clone the github repo. <br>
    ```cmd
    cd ~/
    ```
    ```cmd
-   git clone https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot
+   git clone https://github.com/Hooandee/Handheld-Clover-dualboot
    ```
    
    If it errors that folder already exists, delete the old folder first - <br>
    ```cmd
-   rm -rf ~/SteamDeck-Clover-dualboot
+   rm -rf ~/Handheld-Clover-dualboot
    ```
    
    Then perform the clone again - <br>
    ```cmd
-   git clone https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot
+   git clone https://github.com/Hooandee/Handheld-Clover-dualboot
    ```
    
 3. Execute the script! <br>
    ```cmd
-   cd ~/SteamDeck-Clover-dualboot
+   cd ~/Handheld-Clover-dualboot
    ```
    ```cmd
    chmod +x install-Clover.sh
