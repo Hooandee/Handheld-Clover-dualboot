@@ -1,3 +1,3 @@
-import { defineConfig } from "@decky/rollup";
+import deckyPlugin from "@decky/rollup";
 
-export default defineConfig({});
+export default deckyPlugin();
