@@ -1,0 +1,182 @@
+#!/bin/bash
+#
+# clover-ctl - non-interactive engine for the Clover dual-boot tools.
+# The desktop app and the Decky plugin both call this; it does the real work
+# so the logic lives in one place. Mutating commands need root (the frontends
+# elevate via pkexec or Decky's root backend). Set CLOVER_CONFIG to point the
+# read / config-write commands at a specific config.plist (used by the tests).
+
+set -u
+
+detect_os() {
+	if grep -qi bazzite /etc/os-release 2> /dev/null
+	then
+		OS=bazzite; EFI_PATH=/boot/efi/EFI; BOOTX64=$EFI_PATH/BOOT/BOOTX64.EFI
+	elif grep -qi steamos /etc/os-release 2> /dev/null
+	then
+		OS=SteamOS; EFI_PATH=/esp/efi; BOOTX64=$EFI_PATH/boot/bootx64.efi
+	else
+		OS=unknown; EFI_PATH=; BOOTX64=
+	fi
+}
+detect_os
+CONFIG=${CLOVER_CONFIG:-${EFI_PATH:+$EFI_PATH/clover/config.plist}}
+
+die() { echo "clover-ctl: $1" >&2; exit 1; }
+need_efi() { [ -n "$EFI_PATH" ] || die "not running on SteamOS or Bazzite"; }
+
+# root is required for the real install paths; skipped when CLOVER_CONFIG points
+# the tool at a test file the current user already owns
+need_root() {
+	[ -n "${CLOVER_CONFIG:-}" ] && return 0
+	[ "$(id -u)" = 0 ] || die "must run as root (try: sudo clover-ctl $CMD ...)"
+}
+
+# value of a <key> in a plist - the text on the following line, tags stripped
+plist_get() {
+	awk -v k="<key>$1</key>" '
+		f { sub(/^[[:space:]]*<[^>]*>/, ""); sub(/<\/[^>]*>[[:space:]]*$/, ""); print; exit }
+		index($0, k) { f = 1 }
+	' "$2" 2> /dev/null
+}
+
+# rewrite the value line after a <key>; portable (BSD/GNU) and backslash-safe via ENVIRON
+plist_set() {
+	PLIST_VAL=$3 awk -v k="<key>$1</key>" -v tag="$2" '
+		repl { print "\t\t<" tag ">" ENVIRON["PLIST_VAL"] "</" tag ">"; repl = 0; next }
+		{ print }
+		index($0, k) { repl = 1 }
+	' "$4" > "$4.cloverctl.tmp" && mv "$4.cloverctl.tmp" "$4"
+}
+
+# native panel resolution from the kernel, normalized to landscape (panels are often mounted rotated)
+detect_native_resolution() {
+	local modes res w h
+	for modes in /sys/class/drm/*eDP*/modes /sys/class/drm/*DSI*/modes /sys/class/drm/*LVDS*/modes
+	do
+		[ -f "$modes" ] || continue
+		res=$(head -n1 "$modes" 2> /dev/null)
+		case "$res" in *x*) ;; *) continue ;; esac
+		w=${res%%x*}; h=${res##*x}
+		case "$w$h" in *[!0-9]*) continue ;; esac
+		[ "$h" -gt "$w" ] && echo "${h}x${w}" || echo "${w}x${h}"
+		return 0
+	done
+	return 1
+}
+
+default_os_from_config() {
+	local loader volume
+	loader=$(plist_get DefaultLoader "$CONFIG" | tr 'A-Z' 'a-z')
+	volume=$(plist_get DefaultVolume "$CONFIG")
+	case "$volume" in *LastBootedVolume*) echo lastos; return ;; esac
+	case "$loader" in
+		*microsoft*) echo windows ;;
+		*steamcl*) echo steamos ;;
+		*fedora*|*shimx64*) echo bazzite ;;
+		*) echo unknown ;;
+	esac
+}
+
+json_bool() { [ "$1" = yes ] && echo true || echo false; }
+
+CMD=${1:-help}
+shift 2> /dev/null || true
+
+case "$CMD" in
+status)
+	if [ -n "$CONFIG" ] && [ -f "$CONFIG" ]; then installed=yes; else installed=no; fi
+	if systemctl is-enabled clover-bootmanager &> /dev/null; then service=enabled
+	elif systemctl list-unit-files clover-bootmanager.service &> /dev/null; then service=disabled
+	else service=absent; fi
+	if [ -n "$EFI_PATH" ] && [ -e "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" ]; then winactive=yes; else winactive=no; fi
+	printf '{"os":"%s","installed":%s,"resolution":"%s","theme":"%s","timeout":"%s","default_os":"%s","service":"%s","windows_active":%s}\n' \
+		"$OS" "$(json_bool $installed)" \
+		"$(plist_get ScreenResolution "$CONFIG")" "$(plist_get Theme "$CONFIG")" \
+		"$(plist_get Timeout "$CONFIG")" "$(default_os_from_config)" \
+		"$service" "$(json_bool $winactive)"
+	;;
+get)
+	case "${1:-}" in
+		resolution) plist_get ScreenResolution "$CONFIG" ;;
+		theme) plist_get Theme "$CONFIG" ;;
+		timeout) plist_get Timeout "$CONFIG" ;;
+		default-os) default_os_from_config ;;
+		*) die "usage: clover-ctl get <resolution|theme|timeout|default-os>" ;;
+	esac
+	;;
+list-themes)
+	need_efi
+	ls "$EFI_PATH/clover/themes" 2> /dev/null
+	;;
+detect-resolution)
+	detect_native_resolution
+	;;
+set-resolution)
+	need_root
+	val=${1:-}
+	[ "$val" = auto ] && val=$(detect_native_resolution)
+	[ -n "$val" ] || die "no resolution given and auto-detect failed"
+	case "$val" in [0-9]*x[0-9]*) ;; *) die "invalid resolution: $val (expected WxH)" ;; esac
+	plist_set ScreenResolution string "$val" "$CONFIG"
+	echo "resolution set to $val"
+	;;
+set-theme)
+	need_root
+	[ -n "${1:-}" ] || die "usage: clover-ctl set-theme <name>"
+	plist_set Theme string "$1" "$CONFIG"
+	echo "theme set to $1"
+	;;
+set-timeout)
+	need_root
+	case "${1:-}" in ''|*[!0-9]*) die "usage: clover-ctl set-timeout <seconds>" ;; esac
+	plist_set Timeout integer "$1" "$CONFIG"
+	echo "timeout set to $1"
+	;;
+set-default-os)
+	need_root
+	case "${1:-}" in
+		windows) plist_set DefaultLoader string '\efi\microsoft\bootmgfw.efi' "$CONFIG"; plist_set DefaultVolume string esp "$CONFIG" ;;
+		steamos) plist_set DefaultLoader string '\efi\steamos\steamcl.efi' "$CONFIG"; plist_set DefaultVolume string esp "$CONFIG" ;;
+		bazzite) plist_set DefaultLoader string '\EFI\FEDORA\shimx64.efi' "$CONFIG"; plist_set DefaultVolume string esp "$CONFIG" ;;
+		lastos) plist_set DefaultVolume string LastBootedVolume "$CONFIG" ;;
+		*) die "usage: clover-ctl set-default-os <windows|steamos|bazzite|lastos>" ;;
+	esac
+	echo "default boot set to $1"
+	;;
+service)
+	need_root; need_efi
+	case "${1:-}" in
+		disable)
+			cp "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$EFI_PATH/Microsoft/Boot/bootmgfw.efi"
+			win=$(efibootmgr | grep -i Windows | colrm 9 | colrm 1 4)
+			[ -n "$win" ] && efibootmgr -n "$win" &> /dev/null
+			systemctl disable --now clover-bootmanager
+			echo "clover service disabled - Windows will boot next"
+			;;
+		enable)
+			systemctl enable --now clover-bootmanager
+			[ -x /etc/systemd/system/clover-bootmanager.sh ] && /etc/systemd/system/clover-bootmanager.sh
+			echo "clover service enabled"
+			;;
+		*) die "usage: clover-ctl service <enable|disable>" ;;
+	esac
+	;;
+help|--help|-h)
+	cat <<'USAGE'
+clover-ctl <command> [args]
+  status                                            current config + state as JSON
+  get <resolution|theme|timeout|default-os>         read one value
+  list-themes                                       installed Clover themes
+  detect-resolution                                 native panel resolution
+  set-resolution <WxH|auto>                         (root)
+  set-theme <name>                                  (root)
+  set-timeout <seconds>                             (root)
+  set-default-os <windows|steamos|bazzite|lastos>   (root)
+  service <enable|disable>                          (root) enable Clover, or hand next boot to Windows
+USAGE
+	;;
+*)
+	die "unknown command: $CMD (try: clover-ctl help)"
+	;;
+esac
