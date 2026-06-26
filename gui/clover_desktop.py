@@ -373,7 +373,8 @@ class CloverWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Clover Dual Boot")
-    CloverWindow().show()
+    win = CloverWindow()
+    win.show()
     sys.exit(app.exec())
 
 
