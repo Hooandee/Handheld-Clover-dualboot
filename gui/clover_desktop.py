@@ -11,8 +11,8 @@ import shutil
 import subprocess
 import sys
 
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
@@ -38,6 +38,23 @@ RES_PRESETS = ["Auto-detect", "1280x800", "1920x1080", "1920x1200", "2560x1600"]
 TIMEOUTS = ["1", "5", "10", "15", "60"]
 DEFAULT_OS = [("Windows", "windows"), ("SteamOS", "steamos"),
               ("Bazzite", "bazzite"), ("Last used", "lastos")]
+
+ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clover.svg")
+
+QSS = """
+QListWidget#sidebar { background: #20242b; border: none; outline: 0; padding-top: 8px; }
+QListWidget#sidebar::item { padding: 10px 14px; margin: 3px 8px; border-radius: 8px; color: #c9d1da; }
+QListWidget#sidebar::item:hover { background: #2a2f38; }
+QListWidget#sidebar::item:selected { background: #2f9e50; color: white; }
+QPushButton { background: #2f9e50; color: white; border: none; border-radius: 7px; padding: 7px 16px; font-weight: 600; }
+QPushButton:hover { background: #38b85e; }
+QPushButton:pressed { background: #278544; }
+QPushButton:disabled { background: #3a4049; color: #8b929c; }
+QPushButton#danger { background: #c0392b; }
+QPushButton#danger:hover { background: #d8453a; }
+QFrame#card, QLabel#card { background: #20242b; border: 1px solid #2d333d; border-radius: 10px; }
+QLabel#card { padding: 8px; color: #aeb6c0; }
+"""
 
 
 class Engine:
@@ -90,13 +107,19 @@ class Engine:
         rc, out, _ = self.run(["list-logos"], parent, root=False)
         return out.splitlines() if rc == 0 and out else []
 
+    def theme_preview(self, name, parent):
+        rc, out, _ = self.run(["theme-preview", name], parent)
+        return out if rc == 0 else ""
+
 
 class CloverWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.engine = Engine()
         self.setWindowTitle("Clover Dual Boot")
-        self.resize(660, 470)
+        self.setWindowIcon(QIcon(ICON))
+        self.setStyleSheet(QSS)
+        self.resize(680, 480)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -105,6 +128,7 @@ class CloverWindow(QMainWindow):
         layout.setSpacing(0)
 
         self.sidebar = QListWidget()
+        self.sidebar.setObjectName("sidebar")
         self.sidebar.setIconSize(QSize(22, 22))
         self.sidebar.setFixedWidth(170)
         self.sidebar.setFrameShape(QFrame.Shape.NoFrame)
@@ -164,7 +188,11 @@ class CloverWindow(QMainWindow):
             self.status_fields[key] = val
             grid.addWidget(val, i, 1)
         grid.setColumnStretch(1, 1)
-        v.addLayout(grid)
+        card = QFrame()
+        card.setObjectName("card")
+        card_layout = QVBoxLayout(card)
+        card_layout.addLayout(grid)
+        v.addWidget(card)
         v.addStretch(1)
         row = QHBoxLayout()
         refresh = QPushButton(self._icon("view-refresh", QStyle.StandardPixmap.SP_BrowserReload), "Refresh")
@@ -216,8 +244,14 @@ class CloverWindow(QMainWindow):
         page, v = self._page("Theme")
         form = QFormLayout()
         self.theme_combo = QComboBox()
+        self.theme_combo.textActivated.connect(self._update_theme_preview)
         form.addRow("Clover theme", self._apply_row(self.theme_combo, self.apply_theme))
         v.addLayout(form)
+        self.theme_preview = QLabel("Pick a theme above to preview it.")
+        self.theme_preview.setObjectName("card")
+        self.theme_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.theme_preview.setMinimumHeight(180)
+        v.addWidget(self.theme_preview)
         v.addWidget(QLabel("Themes live on the EFI partition. \"random\" rotates on each boot."))
         v.addSpacing(14)
         v.addWidget(QLabel("<b>Boot logo</b>"))
@@ -259,6 +293,7 @@ class CloverWindow(QMainWindow):
         v.addWidget(QLabel("<b>Danger zone</b>"))
         v.addWidget(QLabel("Remove Clover and restore the Windows bootloader."))
         uninstall = QPushButton(self._icon("edit-delete", QStyle.StandardPixmap.SP_TrashIcon), "Uninstall Clover")
+        uninstall.setObjectName("danger")
         uninstall.clicked.connect(self.uninstall)
         v.addWidget(uninstall)
         v.addStretch(1)
@@ -271,6 +306,8 @@ class CloverWindow(QMainWindow):
             return
         for key, lbl in self.status_fields.items():
             lbl.setText(str(st.get(key, "—")))
+        self._tint(self.status_fields.get("service"), st.get("service") == "enabled")
+        self._tint(self.status_fields.get("windows_active"), str(st.get("windows_active")).lower() != "true")
         self._select(self.res_combo, st.get("resolution"))
         self._select(self.timeout_combo, st.get("timeout"))
         for i, (_, value) in enumerate(DEFAULT_OS):
@@ -286,6 +323,20 @@ class CloverWindow(QMainWindow):
             if logos:
                 self.logo_combo.addItems(logos)
         self.statusBar().showMessage("Ready")
+
+    def _tint(self, label, good):
+        if label is not None:
+            label.setStyleSheet("color: #3fbf6a;" if good else "color: #e0a83e;")
+
+    def _update_theme_preview(self, name):
+        if not name:
+            return
+        path = self.engine.theme_preview(name, self)
+        pixmap = QPixmap(path) if path else QPixmap()
+        if not pixmap.isNull():
+            self.theme_preview.setPixmap(pixmap.scaledToWidth(380, Qt.TransformationMode.SmoothTransformation))
+        else:
+            self.theme_preview.setText("No preview available for this theme.")
 
     def _select(self, combo, value):
         if value is None:
@@ -373,6 +424,7 @@ class CloverWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Clover Dual Boot")
+    app.setWindowIcon(QIcon(ICON))
     win = CloverWindow()
     win.show()
     sys.exit(app.exec())

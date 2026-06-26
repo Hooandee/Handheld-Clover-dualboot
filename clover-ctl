@@ -298,6 +298,21 @@ uninstall)
 	rm -rf "$home/1Clover-tools"
 	echo "Clover uninstalled - reboot to return to Windows."
 	;;
+theme-preview)
+	need_root; need_efi
+	name=${1:-}
+	[ -n "$name" ] || die "usage: clover-ctl theme-preview <name>"
+	case "$name" in */*) die "invalid theme name" ;; esac
+	dir="$EFI_PATH/clover/themes/$name"
+	[ -d "$dir" ] || die "theme not found: $name"
+	img=$(ls "$dir" 2> /dev/null | grep -iE '\.(png|jpg|jpeg)$' | grep -i background | head -n1)
+	[ -n "$img" ] || img=$(ls "$dir" 2> /dev/null | grep -iE 'screenshot.*\.(png|jpg|jpeg)$' | head -n1)
+	[ -n "$img" ] || img=$(ls "$dir" 2> /dev/null | grep -iE '\.(png|jpg|jpeg)$' | head -n1)
+	[ -n "$img" ] || die "no preview image in theme $name"
+	out="/tmp/clover-theme-preview.png"
+	cp "$dir/$img" "$out" && chmod 644 "$out"
+	echo "$out"
+	;;
 help|--help|-h)
 	cat <<'USAGE'
 clover-ctl <command> [args]
@@ -317,6 +332,7 @@ clover-ctl <command> [args]
   set-logo <name.png>                               (root) set the boot (BGRT) logo
   reset-logo                                        (root) restore the default boot logo
   uninstall                                         (root) remove Clover and restore the Windows bootloader
+  theme-preview <name>                              (root) copy a theme's preview image to /tmp, print the path
 USAGE
 	;;
 *)
