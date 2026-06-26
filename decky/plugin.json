@@ -1,0 +1,11 @@
+{
+  "name": "Clover Dual Boot",
+  "author": "Hooandee",
+  "flags": ["root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["system", "boot", "dualboot"],
+    "description": "Configure Clover dual boot from Game Mode - default OS, resolution, theme, timeout, and hand the next boot to Windows.",
+    "image": ""
+  }
+}

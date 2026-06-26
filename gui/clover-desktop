@@ -1,0 +1,20 @@
+#!/bin/bash
+#
+# Launches the Clover desktop app. On first run it builds a self-contained
+# PySide6 virtualenv under ~/1Clover-tools/venv, so nothing is installed into
+# the (immutable) SteamOS / Bazzite system.
+
+set -e
+HERE=$(cd "$(dirname "$0")" && pwd)
+VENV="${CLOVER_VENV:-$HOME/1Clover-tools/venv}"
+PY="$VENV/bin/python"
+
+if [ ! -x "$PY" ]
+then
+	echo "First run: preparing the UI environment (downloads PySide6, one time)..."
+	python3 -m venv "$VENV"
+	"$VENV/bin/pip" install --upgrade pip > /dev/null
+	"$VENV/bin/pip" install PySide6 || { echo "Could not install PySide6 - is there network access?"; exit 1; }
+fi
+
+exec "$PY" "$HERE/clover_desktop.py" "$@"
