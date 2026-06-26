@@ -215,6 +215,26 @@ with zipfile.ZipFile('$tmp/p.zip') as z:
 	systemctl restart plugin_loader 2> /dev/null && echo "Decky restarted." || echo "Installed - reload Decky to see it."
 	echo "Decky plugin installed to: $dest"
 	;;
+diagnostics)
+	need_root
+	user=${SUDO_USER:-$(id -un 1000 2> /dev/null || echo "$USER")}
+	home=$(getent passwd "$user" | cut -d: -f6)
+	[ -n "$home" ] || home="$HOME"
+	out="$home/clover-report-$(date +%Y%m%d-%H%M%S).txt"
+	{
+		echo "# Clover diagnostics - $(date)"
+		echo; echo "## OS"; grep -E 'PRETTY_NAME|VERSION_ID|BUILD_ID' /etc/os-release 2> /dev/null
+		echo; echo "## Device (DMI)"
+		for f in sys_vendor product_name board_name; do echo "$f: $(cat /sys/class/dmi/id/$f 2> /dev/null)"; done
+		echo; echo "## clover-ctl status"; "$0" status 2>&1
+		echo; echo "## EFI boot entries"; efibootmgr 2>&1 | grep -iv 'Boot2\|PXE'
+		echo; echo "## config.plist"; grep -A1 -E 'ScreenResolution|<key>Theme|<key>Timeout|DefaultLoader|DefaultVolume' "$CONFIG" 2> /dev/null
+		echo; echo "## boot-manager status"; cat "$home/1Clover-tools/status.txt" 2> /dev/null
+		echo; echo "## service log"; journalctl -u clover-bootmanager -n 40 --no-pager 2> /dev/null
+	} > "$out" 2>&1
+	chown "$user":"$user" "$out" 2> /dev/null || true
+	echo "$out"
+	;;
 help|--help|-h)
 	cat <<'USAGE'
 clover-ctl <command> [args]
@@ -228,6 +248,7 @@ clover-ctl <command> [args]
   set-default-os <windows|steamos|bazzite|lastos>   (root)
   service <enable|disable>                          (root) enable Clover, or hand next boot to Windows
   install-decky                                     (root) install/update the Decky (Game Mode) plugin
+  diagnostics                                       (root) write a bug-report bundle to your home folder
 USAGE
 	;;
 *)

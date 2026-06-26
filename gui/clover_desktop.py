@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Desktop UI for the Clover dual-boot tools. A thin frontend over clover-ctl.
+"""Desktop UI for the Clover dual-boot tools - a thin frontend over clover-ctl.
 
-Every privileged action is performed by `sudo clover-ctl ...`; the password is
-asked once and reused for the session (same model as the old zenity Toolbox).
+Sidebar navigation with one page per area. Privileged actions run via
+`sudo clover-ctl ...`; the password is asked once and reused for the session.
 """
 
 import json
@@ -11,11 +11,13 @@ import shutil
 import subprocess
 import sys
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
-    QLabel, QPushButton, QComboBox, QInputDialog, QLineEdit, QMessageBox,
+    QApplication, QComboBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout,
+    QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
+    QMessageBox, QPushButton, QStackedWidget, QStyle, QVBoxLayout, QWidget,
 )
-from PySide6.QtCore import Qt
 
 
 def find_ctl():
@@ -23,12 +25,9 @@ def find_ctl():
     if env and os.path.exists(env):
         return os.path.abspath(env)
     here = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        os.path.join(here, "..", "clover-ctl"),
-        os.path.expanduser("~/1Clover-tools/clover-ctl"),
-        shutil.which("clover-ctl"),
-    ]
-    for c in candidates:
+    for c in (os.path.join(here, "..", "clover-ctl"),
+              os.path.expanduser("~/1Clover-tools/clover-ctl"),
+              shutil.which("clover-ctl")):
         if c and os.path.exists(c):
             return os.path.abspath(c)
     return "clover-ctl"
@@ -50,9 +49,9 @@ class Engine:
     def ensure_auth(self, parent):
         if self.password is not None:
             return True
-        pw, ok = QInputDialog.getText(
-            parent, "Authentication", "Enter your sudo password:",
-            QLineEdit.EchoMode.Password)
+        pw, ok = QInputDialog.getText(parent, "Authentication",
+                                      "Enter your sudo password:",
+                                      QLineEdit.EchoMode.Password)
         if not ok:
             return False
         check = subprocess.run(["sudo", "-S", "-v"], input=pw + "\n",
@@ -88,94 +87,154 @@ class Engine:
         return out.splitlines() if rc == 0 and out else []
 
 
-class CloverWindow(QWidget):
+class CloverWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.engine = Engine()
         self.setWindowTitle("Clover Dual Boot")
-        self.setMinimumWidth(460)
+        self.resize(660, 470)
 
-        root = QVBoxLayout(self)
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QHBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        self.status_label = QLabel("Loading…")
-        self.status_label.setWordWrap(True)
-        status_box = QGroupBox("Current state")
-        sb = QVBoxLayout(status_box)
-        sb.addWidget(self.status_label)
-        root.addWidget(status_box)
+        self.sidebar = QListWidget()
+        self.sidebar.setIconSize(QSize(22, 22))
+        self.sidebar.setFixedWidth(170)
+        self.sidebar.setFrameShape(QFrame.Shape.NoFrame)
+        self.stack = QStackedWidget()
 
-        controls = QGroupBox("Settings")
-        form = QFormLayout(controls)
+        pages = [
+            ("Status", "dialog-information", QStyle.StandardPixmap.SP_MessageBoxInformation, self._status_page),
+            ("Boot", "drive-harddisk", QStyle.StandardPixmap.SP_DriveHDIcon, self._boot_page),
+            ("Display", "video-display", QStyle.StandardPixmap.SP_DesktopIcon, self._display_page),
+            ("Themes", "preferences-desktop-theme", QStyle.StandardPixmap.SP_FileDialogContentsView, self._themes_page),
+            ("Game Mode", "input-gaming", QStyle.StandardPixmap.SP_ComputerIcon, self._gamemode_page),
+        ]
+        for title, icon_name, fallback, builder in pages:
+            self.sidebar.addItem(QListWidgetItem(self._icon(icon_name, fallback), title))
+            self.stack.addWidget(builder())
 
+        self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
+        layout.addWidget(self.sidebar)
+        layout.addWidget(self.stack, 1)
+
+        self.sidebar.setCurrentRow(0)
+        self.refresh()
+
+    def _icon(self, name, fallback):
+        ic = QIcon.fromTheme(name)
+        return ic if not ic.isNull() else self.style().standardIcon(fallback)
+
+    def _page(self, title):
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(18, 14, 18, 14)
+        v.addWidget(QLabel(f"<h2>{title}</h2>"))
+        return page, v
+
+    def _apply_row(self, widget, handler):
+        wrap = QWidget()
+        h = QHBoxLayout(wrap)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.addWidget(widget, 1)
+        btn = QPushButton("Apply")
+        btn.clicked.connect(handler)
+        h.addWidget(btn)
+        return wrap
+
+    def _status_page(self):
+        page, v = self._page("Current state")
+        grid = QGridLayout()
+        self.status_fields = {}
+        rows = [("OS", "os"), ("Clover installed", "installed"),
+                ("Default boot", "default_os"), ("Service", "service"),
+                ("Resolution", "resolution"), ("Theme", "theme"),
+                ("Timeout (s)", "timeout"), ("Windows active", "windows_active")]
+        for i, (label, key) in enumerate(rows):
+            grid.addWidget(QLabel(f"<b>{label}</b>"), i, 0)
+            val = QLabel("…")
+            self.status_fields[key] = val
+            grid.addWidget(val, i, 1)
+        grid.setColumnStretch(1, 1)
+        v.addLayout(grid)
+        v.addStretch(1)
+        row = QHBoxLayout()
+        refresh = QPushButton(self._icon("view-refresh", QStyle.StandardPixmap.SP_BrowserReload), "Refresh")
+        refresh.clicked.connect(self.refresh)
+        report = QPushButton(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton), "Save bug report")
+        report.clicked.connect(self.save_report)
+        row.addWidget(refresh)
+        row.addWidget(report)
+        row.addStretch(1)
+        v.addLayout(row)
+        return page
+
+    def _boot_page(self):
+        page, v = self._page("Boot")
+        form = QFormLayout()
         self.default_combo = QComboBox()
         for label, _ in DEFAULT_OS:
             self.default_combo.addItem(label)
-        form.addRow("Default boot OS", self._with_apply(self.default_combo, self.apply_default_os))
+        form.addRow("Default boot OS", self._apply_row(self.default_combo, self.apply_default_os))
+        v.addLayout(form)
+        v.addSpacing(12)
+        v.addWidget(QLabel("<b>Quick actions</b>"))
+        row = QHBoxLayout()
+        win = QPushButton("Boot to Windows next")
+        win.clicked.connect(self.boot_windows)
+        clv = QPushButton("Re-enable Clover")
+        clv.clicked.connect(self.enable_clover)
+        row.addWidget(win)
+        row.addWidget(clv)
+        v.addLayout(row)
+        v.addStretch(1)
+        return page
 
+    def _display_page(self):
+        page, v = self._page("Display")
+        form = QFormLayout()
         self.res_combo = QComboBox()
         self.res_combo.setEditable(True)
         self.res_combo.addItems(RES_PRESETS)
-        form.addRow("Screen resolution", self._with_apply(self.res_combo, self.apply_resolution))
-
-        self.theme_combo = QComboBox()
-        form.addRow("Theme", self._with_apply(self.theme_combo, self.apply_theme))
-
+        form.addRow("Screen resolution", self._apply_row(self.res_combo, self.apply_resolution))
         self.timeout_combo = QComboBox()
         self.timeout_combo.addItems(TIMEOUTS)
-        form.addRow("Boot menu timeout (s)", self._with_apply(self.timeout_combo, self.apply_timeout))
+        form.addRow("Boot menu timeout (s)", self._apply_row(self.timeout_combo, self.apply_timeout))
+        v.addLayout(form)
+        v.addStretch(1)
+        return page
 
-        root.addWidget(controls)
+    def _themes_page(self):
+        page, v = self._page("Theme")
+        form = QFormLayout()
+        self.theme_combo = QComboBox()
+        form.addRow("Clover theme", self._apply_row(self.theme_combo, self.apply_theme))
+        v.addLayout(form)
+        v.addWidget(QLabel("Themes live on the EFI partition. \"random\" rotates on each boot."))
+        v.addStretch(1)
+        return page
 
-        service_box = QGroupBox("Boot control")
-        srow = QHBoxLayout(service_box)
-        win_btn = QPushButton("Boot to Windows next")
-        win_btn.clicked.connect(self.boot_windows)
-        clover_btn = QPushButton("Re-enable Clover")
-        clover_btn.clicked.connect(self.enable_clover)
-        srow.addWidget(win_btn)
-        srow.addWidget(clover_btn)
-        root.addWidget(service_box)
-
-        gm_box = QGroupBox("Game Mode (Decky)")
-        grow = QHBoxLayout(gm_box)
-        decky_btn = QPushButton("Install / update Decky plugin")
-        decky_btn.clicked.connect(self.install_decky)
-        grow.addWidget(decky_btn)
-        root.addWidget(gm_box)
-
-        bottom = QHBoxLayout()
-        refresh = QPushButton("Refresh")
-        refresh.clicked.connect(self.refresh)
-        quit_btn = QPushButton("Quit")
-        quit_btn.clicked.connect(self.close)
-        bottom.addStretch()
-        bottom.addWidget(refresh)
-        bottom.addWidget(quit_btn)
-        root.addLayout(bottom)
-
-        self.refresh()
-
-    def _with_apply(self, widget, handler):
-        wrap = QWidget()
-        lay = QHBoxLayout(wrap)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(widget, 1)
-        btn = QPushButton("Apply")
-        btn.clicked.connect(handler)
-        lay.addWidget(btn)
-        return wrap
+    def _gamemode_page(self):
+        page, v = self._page("Game Mode (Decky)")
+        v.addWidget(QLabel("Install the Decky plugin to control Clover from Game Mode\n"
+                           "(default OS, resolution, theme, timeout, boot-to-Windows)."))
+        btn = QPushButton(self._icon("input-gaming", QStyle.StandardPixmap.SP_ComputerIcon),
+                          "Install / update Decky plugin")
+        btn.clicked.connect(self.install_decky)
+        v.addWidget(btn)
+        v.addStretch(1)
+        return page
 
     def refresh(self):
         st = self.engine.status(self)
         if not st:
-            self.status_label.setText("Could not read Clover status (is it installed?).")
+            self.statusBar().showMessage("Could not read Clover status (is it installed?)")
             return
-        self.status_label.setText(
-            f"OS: {st.get('os')}    Clover installed: {st.get('installed')}\n"
-            f"Default boot: {st.get('default_os')}    Service: {st.get('service')}\n"
-            f"Resolution: {st.get('resolution')}    Theme: {st.get('theme')}    "
-            f"Timeout: {st.get('timeout')}s")
-        # reflect current values in the controls
+        for key, lbl in self.status_fields.items():
+            lbl.setText(str(st.get(key, "—")))
         self._select(self.res_combo, st.get("resolution"))
         self._select(self.timeout_combo, st.get("timeout"))
         for i, (_, value) in enumerate(DEFAULT_OS):
@@ -186,6 +245,7 @@ class CloverWindow(QWidget):
             if themes:
                 self.theme_combo.addItems(themes)
         self._select(self.theme_combo, st.get("theme"))
+        self.statusBar().showMessage("Ready")
 
     def _select(self, combo, value):
         if value is None:
@@ -199,8 +259,8 @@ class CloverWindow(QWidget):
     def _apply(self, args, ok_msg):
         rc, out, err = self.engine.run(args, self)
         if rc == 0:
+            self.statusBar().showMessage("✓ " + ok_msg)
             self.refresh()
-            self.status_label.setText(self.status_label.text() + f"\n\n✓ {ok_msg}")
         elif err != "cancelled":
             QMessageBox.warning(self, "Clover", err or out or "Command failed.")
 
@@ -236,11 +296,18 @@ class CloverWindow(QWidget):
         elif err != "cancelled":
             QMessageBox.warning(self, "Clover", err or out or "Could not install the Decky plugin.")
 
+    def save_report(self):
+        rc, out, err = self.engine.run(["diagnostics"], self)
+        if rc == 0:
+            QMessageBox.information(self, "Clover", f"Bug report saved to:\n{out}")
+        elif err != "cancelled":
+            QMessageBox.warning(self, "Clover", err or out or "Could not write the report.")
+
 
 def main():
     app = QApplication(sys.argv)
-    win = CloverWindow()
-    win.show()
+    app.setApplicationName("Clover Dual Boot")
+    CloverWindow().show()
     sys.exit(app.exec())
 
 
