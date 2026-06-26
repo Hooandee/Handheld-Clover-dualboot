@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Graphical, no-terminal installer for Clover dual-boot. Double-click this (or
-# its launcher) and it wraps install-Clover.sh with zenity dialogs: one password
+# its launcher) and it wraps install-clover.sh with zenity dialogs: one password
 # prompt and a progress window, nothing to type. zenity ships on SteamOS and
 # Bazzite (the Clover Toolbox already uses it).
 

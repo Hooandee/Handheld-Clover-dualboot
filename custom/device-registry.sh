@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Device registry for the Clover installer. Sourced by install-Clover.sh.
+# Device registry for the Clover installer. Sourced by install-clover.sh.
 # To add a handheld, add one row below. Columns are pipe-separated:
 #
 #   match_field | match_value | friendly_name | action
