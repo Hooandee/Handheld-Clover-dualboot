@@ -349,9 +349,11 @@ cp custom/Clover-Toolbox.sh ~/1Clover-tools &> /dev/null
 echo -e "$current_password\n" | sudo -S cp custom/clover-bootmanager.service custom/clover-bootmanager.sh /etc/systemd/system
 cp -R custom/logos ~/1Clover-tools &> /dev/null
 cp -R custom/efi ~/1Clover-tools &> /dev/null
+cp clover-ctl ~/1Clover-tools &> /dev/null
+cp -R gui ~/1Clover-tools &> /dev/null
 
 # make the scripts executable
-chmod +x ~/1Clover-tools/Clover-Toolbox.sh
+chmod +x ~/1Clover-tools/Clover-Toolbox.sh ~/1Clover-tools/clover-ctl ~/1Clover-tools/gui/clover-desktop
 echo -e "$current_password\n" | sudo -S chmod +x /etc/systemd/system/clover-bootmanager.sh
 
 # start the clover-bootmanager.service
@@ -385,5 +387,13 @@ fi
 # create desktop icon for Clover Toolbox
 ln -s ~/1Clover-tools/Clover-Toolbox.sh ~/Desktop/Clover-Toolbox &> /dev/null
 echo -e Desktop icon for Clover Toolbox has been created!
+
+# install the Clover desktop app launcher (apps menu + desktop shortcut)
+mkdir -p ~/.local/share/applications
+sed "s|^Exec=.*|Exec=$HOME/1Clover-tools/gui/clover-desktop|" ~/1Clover-tools/gui/clover-dualboot.desktop > ~/.local/share/applications/clover-dualboot.desktop
+chmod +x ~/.local/share/applications/clover-dualboot.desktop
+cp ~/.local/share/applications/clover-dualboot.desktop ~/Desktop/ &> /dev/null
+chmod +x ~/Desktop/clover-dualboot.desktop &> /dev/null
+echo Clover desktop app has been installed!
 
 echo Clover install completed on $OS!
