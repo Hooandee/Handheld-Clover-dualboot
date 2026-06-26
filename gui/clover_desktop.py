@@ -14,9 +14,10 @@ import sys
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout,
-    QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
-    QMessageBox, QPushButton, QStackedWidget, QStyle, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+    QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton,
+    QScrollArea, QStackedWidget, QStyle, QVBoxLayout, QWidget,
 )
 
 
@@ -35,6 +36,7 @@ def find_ctl():
 
 CTL = find_ctl()
 TIMEOUTS = ["1", "5", "10", "15", "60"]
+THEME_LIMIT = 5  # mirrors clover-ctl: the ESP only fits a handful of themes
 
 VERSION = "1.0.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -89,7 +91,22 @@ STRINGS = {
         "preview_hint": "Elige un tema arriba para previsualizarlo.",
         "themes_note": "Los temas viven en la partición EFI. \"random\" rota en cada arranque.",
         "no_preview": "No hay vista previa para este tema.",
+        "lbl_installed_themes": "Temas instalados",
+        "btn_remove": "Quitar", "tag_active": "(activo)",
+        "btn_install_themes": "Instalar temas",
+        "dlg_install_title": "Instalar temas",
+        "install_slots": "Instalados: {n}/{max}. Puedes añadir {free} más.",
+        "install_pick": "Elige los temas a instalar:",
+        "install_loading": "Obteniendo temas disponibles…",
+        "install_load_failed": "No se pudo obtener la lista de temas. Revisa tu conexión.",
+        "install_full": "Ya tienes el máximo de {max} temas. Quita uno antes de instalar otro.",
+        "install_over_limit": "Has elegido demasiados: solo quedan {free} espacios libres.",
+        "install_done": "{ok} tema(s) instalado(s).",
+        "install_some_failed": "{ok} instalado(s), {fail} fallaron:\n{names}",
+        "confirm_remove_theme": "¿Quitar el tema «{name}»?",
+        "ok_theme_removed": "Tema eliminado.",
         "lbl_boot_logo": "Logo de arranque", "btn_set": "Establecer", "btn_restore_default": "Restaurar por defecto",
+        "gamemode_soon": "Próximamente",
         "gamemode_desc": "Instala el plugin de Decky para controlar Clover desde Game Mode\n"
                          "(SO por defecto, resolución, tema, tiempo de espera, arrancar en Windows).",
         "btn_install_decky": "Instalar / actualizar plugin de Decky",
@@ -148,7 +165,22 @@ STRINGS = {
         "preview_hint": "Pick a theme above to preview it.",
         "themes_note": "Themes live on the EFI partition. \"random\" rotates on each boot.",
         "no_preview": "No preview available for this theme.",
+        "lbl_installed_themes": "Installed themes",
+        "btn_remove": "Remove", "tag_active": "(active)",
+        "btn_install_themes": "Install themes",
+        "dlg_install_title": "Install themes",
+        "install_slots": "Installed: {n}/{max}. You can add {free} more.",
+        "install_pick": "Pick the themes to install:",
+        "install_loading": "Fetching available themes…",
+        "install_load_failed": "Could not fetch the theme list. Check your connection.",
+        "install_full": "You already have the maximum of {max} themes. Remove one before installing another.",
+        "install_over_limit": "Too many selected: only {free} free slots left.",
+        "install_done": "{ok} theme(s) installed.",
+        "install_some_failed": "{ok} installed, {fail} failed:\n{names}",
+        "confirm_remove_theme": "Remove the theme “{name}”?",
+        "ok_theme_removed": "Theme removed.",
         "lbl_boot_logo": "Boot logo", "btn_set": "Set", "btn_restore_default": "Restore default",
+        "gamemode_soon": "Coming soon",
         "gamemode_desc": "Install the Decky plugin to control Clover from Game Mode\n"
                          "(default OS, resolution, theme, timeout, boot-to-Windows).",
         "btn_install_decky": "Install / update Decky plugin",
@@ -217,6 +249,7 @@ QPushButton#flag { border-color: #2f9e50; }
 QPushButton#flag:hover, QPushButton#flagoff:hover { border-color: #3a4049; }
 QFrame#card, QLabel#card { background: #20242b; border: 1px solid #2d333d; border-radius: 10px; }
 QLabel#card { padding: 8px; color: #aeb6c0; }
+QLabel#badge { background: #3a4049; color: #e0a83e; border-radius: 6px; padding: 3px 10px; font-weight: 700; }
 """
 
 
@@ -270,6 +303,13 @@ class Engine:
         rc, out, _ = self.run(["list-logos"], parent, root=False)
         return out.splitlines() if rc == 0 and out else []
 
+    def remote_themes(self, parent):
+        rc, out, _ = self.run(["list-remote-themes"], parent, root=False)
+        return out.splitlines() if rc == 0 and out else []
+
+    def install_theme(self, name, parent):
+        return self.run(["install-theme", name], parent)
+
     def theme_preview(self, name, parent):
         rc, out, _ = self.run(["theme-preview", name], parent)
         return out if rc == 0 else ""
@@ -279,6 +319,8 @@ class CloverWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.engine = Engine()
+        self._theme_limit = THEME_LIMIT
+        self._installed_themes = []
         self.lang = load_lang()
         self.t = make_tr(self.lang)
         self.setWindowIcon(QIcon(ICON))
@@ -466,6 +508,17 @@ class CloverWindow(QMainWindow):
         icon_wrap.setLayout(self.icon_row)
         v.addWidget(icon_wrap)
         v.addWidget(QLabel(self.t("themes_note")))
+        v.addSpacing(12)
+        v.addWidget(QLabel(f"<b>{self.t('lbl_installed_themes')}</b>"))
+        self.installed_box = QVBoxLayout()
+        self.installed_box.setSpacing(4)
+        installed_wrap = QWidget()
+        installed_wrap.setLayout(self.installed_box)
+        v.addWidget(installed_wrap)
+        install_btn = QPushButton(self._icon("list-add", QStyle.StandardPixmap.SP_FileDialogNewFolder),
+                                  self.t("btn_install_themes"))
+        install_btn.clicked.connect(self.install_themes_dialog)
+        v.addWidget(install_btn)
         v.addSpacing(14)
         v.addWidget(QLabel(f"<b>{self.t('lbl_boot_logo')}</b>"))
         logo_row = QWidget()
@@ -485,10 +538,14 @@ class CloverWindow(QMainWindow):
 
     def _gamemode_page(self):
         page, v = self._page(self.t("hdr_gamemode"))
+        badge = QLabel(self.t("gamemode_soon"))
+        badge.setObjectName("badge")
+        v.addWidget(badge)
         v.addWidget(QLabel(self.t("gamemode_desc")))
         btn = QPushButton(self._icon("input-gaming", QStyle.StandardPixmap.SP_ComputerIcon),
                           self.t("btn_install_decky"))
         btn.clicked.connect(self.install_decky)
+        btn.setEnabled(False)
         v.addWidget(btn)
         v.addStretch(1)
         return page
@@ -526,6 +583,7 @@ class CloverWindow(QMainWindow):
         if not st:
             self.statusBar().showMessage(self.t("status_unreadable"))
             return
+        self._theme_limit = st.get("theme_limit", THEME_LIMIT)
         for key, lbl in self.status_fields.items():
             lbl.setText(str(st.get(key, "—")))
         self._tint(self.status_fields.get("service"), st.get("service") == "enabled")
@@ -535,11 +593,16 @@ class CloverWindow(QMainWindow):
         for i, (_, value) in enumerate(self.default_os):
             if value == st.get("default_os"):
                 self.default_combo.setCurrentIndex(i)
-        if self.theme_combo.count() == 0:
-            themes = self.engine.themes(self)
-            if themes:
-                self.theme_combo.addItems(themes)
+        themes = self.engine.themes(self)
+        self._installed_themes = themes
+        current = [self.theme_combo.itemText(i) for i in range(self.theme_combo.count())]
+        if themes and themes != current:
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.clear()
+            self.theme_combo.addItems(themes)
+            self.theme_combo.blockSignals(False)
         self._select(self.theme_combo, st.get("theme"))
+        self._populate_installed_themes(themes, st.get("theme"))
         if self.logo_combo.count() == 0:
             logos = self.engine.logos(self)
             if logos:
@@ -588,11 +651,7 @@ class CloverWindow(QMainWindow):
         self._set_theme_icons(icons)
 
     def _set_theme_icons(self, icons):
-        while self.icon_row.count():
-            item = self.icon_row.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        self._clear_layout(self.icon_row)
         for path in icons[:10]:
             pixmap = self._load_pixmap(path)
             if pixmap.isNull():
@@ -601,6 +660,12 @@ class CloverWindow(QMainWindow):
             label.setPixmap(pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             self.icon_row.addWidget(label)
         self.icon_row.addStretch(1)
+
+    def _clear_layout(self, layout):
+        while layout.count():
+            w = layout.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
 
     def _select(self, combo, value):
         if value is None:
@@ -631,6 +696,96 @@ class CloverWindow(QMainWindow):
     def apply_theme(self):
         if self.theme_combo.currentText():
             self._apply(["set-theme", self.theme_combo.currentText()], self.t("ok_theme"))
+
+    def _populate_installed_themes(self, themes, active):
+        self._clear_layout(self.installed_box)
+        for name in themes:
+            row = QWidget()
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            is_active = name == active
+            label = QLabel(f"{name}  {self.t('tag_active')}" if is_active else name)
+            h.addWidget(label, 1)
+            btn = QPushButton(self.t("btn_remove"))
+            btn.setEnabled(not is_active)
+            btn.clicked.connect(lambda _=False, n=name: self.remove_theme(n))
+            h.addWidget(btn)
+            self.installed_box.addWidget(row)
+
+    def remove_theme(self, name):
+        if QMessageBox.question(self, "Clover", self.t("confirm_remove_theme", name=name)) \
+                != QMessageBox.StandardButton.Yes:
+            return
+        self._apply(["remove-theme", name], self.t("ok_theme_removed"))
+
+    def install_themes_dialog(self):
+        limit = self._theme_limit
+        installed = self._installed_themes
+        free = limit - len(installed)
+        if free <= 0:
+            QMessageBox.information(self, "Clover", self.t("install_full", max=limit))
+            return
+        self.statusBar().showMessage(self.t("install_loading"))
+        installed_set = set(installed)
+        remote = [t for t in self.engine.remote_themes(self) if t not in installed_set]
+        self.statusBar().clearMessage()
+        if not remote:
+            QMessageBox.warning(self, "Clover", self.t("install_load_failed"))
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self.t("dlg_install_title"))
+        dlg.resize(360, 460)
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(self.t("install_slots", n=len(installed), max=limit, free=free)))
+        lay.addWidget(QLabel(self.t("install_pick")))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        inner = QWidget()
+        iv = QVBoxLayout(inner)
+        boxes = [QCheckBox(name) for name in remote]
+        for cb in boxes:
+            iv.addWidget(cb)
+        iv.addStretch(1)
+        scroll.setWidget(inner)
+        lay.addWidget(scroll, 1)
+        warn = QLabel("")
+        warn.setStyleSheet("color: #e0a83e;")
+        lay.addWidget(warn)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        lay.addWidget(buttons)
+
+        def update():
+            selected = sum(cb.isChecked() for cb in boxes)
+            ok_btn.setEnabled(0 < selected <= free)
+            warn.setText(self.t("install_over_limit", free=free) if selected > free else "")
+
+        for cb in boxes:
+            cb.toggled.connect(update)
+        update()
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        run_modal = dlg.exec
+        if run_modal() != QDialog.DialogCode.Accepted:
+            return
+
+        selected = [cb.text() for cb in boxes if cb.isChecked()]
+        ok, fails = 0, []
+        for name in selected:
+            rc, out, err = self.engine.install_theme(name, self)
+            if rc == 0:
+                ok += 1
+            elif err == "cancelled":
+                break
+            else:
+                fails.append(f"{name}: {err or out}")
+        self.refresh()
+        if fails:
+            QMessageBox.warning(self, "Clover", self.t("install_some_failed",
+                                ok=ok, fail=len(fails), names="\n".join(fails)))
+        elif ok:
+            self.statusBar().showMessage("✓ " + self.t("install_done", ok=ok))
 
     def apply_timeout(self):
         self._apply(["set-timeout", self.timeout_combo.currentText()], self.t("ok_timeout"))
