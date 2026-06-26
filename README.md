@@ -1,214 +1,58 @@
-# Steam Deck, ROG Ally and ~~Legion Go S~~ Lenovo Legion Go devices - Installing Clover Script for Dual Boot Between SteamOS (or Bazzite) and Windows (and other OSes too!)
+# Clover Dual Boot for Handheld PCs — SteamOS / Bazzite + Windows
 
-## About
+Install [Clover](https://github.com/CloverHackyColor/CloverBootloader), a graphical boot manager, to dual boot SteamOS (or Bazzite) and Windows — and other OSes too — on the Steam Deck and other x86 handhelds.
 
-A collection of tools that is packaged into an easy to use script that is streamlined and tested to work with the Steam Deck and Lenovo Legion Go devices running on SteamOS.
+Based on the original [SteamDeck-Clover-dualboot](https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot) by ryanrudolf ([@10MinuteSteamDeckGamer](https://www.youtube.com/@10MinuteSteamDeckGamer)). This fork broadens handheld support and simplifies installation.
 
-* The main program that does all the heavy lifting is [Clover - a graphical boot manager / boot loader.](https://github.com/CloverHackyColor/CloverBootloader)
-* Clover Toolbox is a shell script that offers a simple GUI to configure some aspects of Clover script.
-* Custom systemd script that performs a sanity check whenever SteamOS starts up making sure that the dual boot is intact and repairs it automatically if needed.
-* XBOX 360 Controller UEFI driver by [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) / [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe) to allow the built-in controller of ROG Ally / Legion Go (and other handhelds / USB controllers) work in Clover and other bootloaders! I've also tested my Logitech F710 it works on this XBOX 360 Conbtroller UEFI driver!
-* [chris1111](https://github.com/chris1111/) for the modified Eclipse theme.
+## What's included
+* **Clover** - the graphical boot manager that does the heavy lifting.
+* **Clover Toolbox** - a simple GUI to configure Clover (themes, screen resolution, uninstall, and more).
+* **Boot-manager systemd service** - sanity-checks the dual boot on every startup and repairs the boot entries automatically if a BIOS / OS / Windows update breaks them.
+* **XBOX 360 controller UEFI driver** by [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) / [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe) so the built-in gamepad of non-Steam-Deck handhelds works inside the Clover boot menu.
+* **Eclipse theme** by [chris1111](https://github.com/chris1111/).
 
-## What's New as of Jun 26 2026
-* added support for the **Lenovo Legion Go 2** (83N0 / 83N1), **ROG Xbox Ally** (RC73YA) and **ROG Xbox Ally X** (RC73XA)
-* **generic handheld mode** - handhelds that are not in the tested list are no longer rejected. The script auto-detects the panel's native resolution from the kernel and offers to continue, so most x86 handhelds work out of the box
-* easier install - a single copy/paste command for both SteamOS and Bazzite (see Quick Install Steps below)
+## Supported devices
 
-## What's New as of Feb 19 2026
-* updated to Clover 5169
-* blocked Legion Go S as the XBOX 360 UEFI driver is not compatible with it (feel free to test / poke around)
+| Handheld | Detected as | Clover resolution |
+|---|---|---|
+| Steam Deck LCD / OLED | `Jupiter` / `Galileo` | 1280x800 (default) |
+| ASUS ROG Ally | `RC71L` | 1920x1080 |
+| ASUS ROG Ally X | `RC72LA` | 1920x1080 |
+| ASUS ROG Xbox Ally | `RC73YA` | 1920x1080 |
+| ASUS ROG Xbox Ally X | `RC73XA` | 1920x1080 |
+| Lenovo Legion Go | `83E1` | 2560x1600 |
+| Lenovo Legion Go 2 | `83N0` / `83N1` | 1920x1200 |
+| Lenovo Legion Go S | `83L3` / `83Q2` / `83Q3` | 1920x1200 |
+| OneXPlayer 2 Pro | `ONEXPLAYER 2 PRO ARP23P` | 2560x1600 |
 
-## What's New as of Feb 19 2026
-Clover script updated!
-* updated to Clover 5168
-* mouse enabled in the config
-* XBOX 360 UEFI driver for ROG Ally / Legion Go devices
-  * DPAD for arrowkeys
-  * A = ENTER
-  * B = ESC
-  * If DPAD doesnt work, use the LEFT THUMBSTICK to control the mouse pointer
-  * RIGHT TRIGGER for LEFT MOUSE CLICK
-  * LEFT TRIGGER for RIGHT MOUSE CLICK
-* XBOX 360 UEFI driver may stall / hang on Legion Go devices
-   * XBOX 360 UEFI driver keeps polling the controller which makes Clover look like in a hang state
-   * Manually delete the XBOX 360 UEFI driver - `sudo rm /esp/efi/clover/drivers/uefi/UsbXbox360Dxe.efi`
-* new theme!
+**Other handhelds** are supported through a generic mode: the installer auto-detects your panel's native resolution from the kernel and asks to continue, so most x86 handhelds work without any code changes.
 
-## What's New as of Feb 17 2026
-**This project is not dead!**
+> ⚠️ **Not supported:** Lenovo Legion Go S `83N6` is blocked because the XBOX 360 controller UEFI driver is incompatible with it.
 
-Just made aware that there is an xbox controller uefi driver. The idea is to use this driver so that Legion Go / Legion Go S will fully work with Clover, and this opens the possibility for Clover to work with other handhelds too like ROG Ally. Please check the pinned issue -
+### Using the controller in the Clover menu
+On every handheld except the Steam Deck, the installer adds an XBOX 360 controller UEFI driver so the built-in gamepad works in the boot menu:
+* **D-pad** - move / arrow keys
+* **A** = Enter, **B** = Esc
+* **Right trigger** = left click, **Left trigger** = right click
+* If the D-pad doesn't respond, use the left thumbstick to move the mouse pointer.
 
-https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/issues/130
-
-https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/issues/126
-
-<details>
-<summary><b>Old Changelog - Click here for more details</b></summary>
-<p><b>July 07 2025</b></p>br
-1. Add Legion GO support 83E1 variant
-
-<p><b>April 25 2025</b></p>br
-1. Add Legion GO S support with different variants - 83Q2 83Q3 83N6 83L3
-2. automatically set config.plist to enable mouse and use screen resolution 1920x1200 when running on Legion GO S
-3. add support for DeckSight OLED panel
-4. Clover 5161
-
-<p><b>December 31 2024</b></p>br
-1. Windows to GO SDCARD config updated. [Use this guide to configure Clover for Windows to GO SDCARD](https://youtu.be/DPUEjOTkTDY)
-2. Cleanup the README.
-<p><b>October 25 2024</b><br>
-1. Updated Clover EFI from 5159 to 5160. <br>
-2. Implemented Clover whitelist - make sure you are on SteamOS 3.6.x for the whitelist to work correctly! <br>
-3. Script can now be installed in Bazzite! <br>
-4. Updated icons for Bazzite. <br>
-5. Added sanity check - make sure SteamOS / Bazzite is installed before Windows! (sorry WinDeckOS users) </p><br>
-
-<p><b>May 19 2024</b><br>
-1. Removed the 7z sanity check as this is now installed by default in SteamOS 3.5.x / 3.6.x <br>
-2. Added ESP sanity check - make sure there is enough space in ESP before doing anything <br>
-3. Removed option for Windows To Go sdcard - you shouldn't run Windows from sdcard anyways! This will also fix the issue of intermittently showing Windows To Go sdcard when Windows is updated. <br>
-4. code cleanup </p><br>
-
-<p><b>January 21 2024</b></br>
-1. Minor update to easily change config between Batocera v38 and the upcoming Batocera v39. <br>
-
-Launch Clover Toolbox and select Batocera to choose between Batocera v38 or Batocera v39 - <br>
-![image](https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/assets/98122529/e256e284-5643-419e-9ed0-267b6210d17a)
-
-Select v39 or v38 - <br>
-![image](https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/assets/98122529/804dbd8d-067e-41da-b8c3-ab7b828cb94e)
-
-Config will be updated based on user selection - <br>
-![image](https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/assets/98122529/ba82a2b5-9035-4705-86bd-a2a7ef283061)
-
-![image](https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/assets/98122529/471ee338-956a-4e9c-9e5c-af115a98cdca)
-</p>
-
-<p><b>January 15 2024)</b></br>
-1. Updated for Clover release 5157. <br>
-2. Added an option in Clover Toolbox to use custom Clover 5157. This hides the OPTIONS button. <br>
-3. Added an option in Clover Toolbox to select the default grey embedded theme. </p><br>
-
-<p><b>December 12 2023</b><br>
-1. Updated for Clover release 5156 <br>
-2. New Steam Deck OLED BGRT Logo </p><br>
-
-<p><b>October 28 2023</b><br>
-1. Updated the script to fix the issue of theme names not getting parsed correctly. Thanks to u/Brian_H8951 for pointing out the issue and the fix! </p><br>
-
-<p><b>October 26 2023</b><br>
-1. add sanity check for 7z binary. If the binary doesnt exist then the SteamOS is very old need to update SteamOS first! <br>
-2. Clover Toolbox - capture the free space on EFI partition. Useful when doing troubleshooting. <br>
-3. Custom BGRT / Logo will be displayed when the Steam Deck is powered on. </p><br>
-
-<p><b>September 26 2023</b><br>
-1. Does not rely on HackBGRT anymore! I've integrated my [BGRT Logo Changer script.](https://github.com/ryanrudolfoba/SteamDeck-Logo-Changer) <br>
-2. Added SteamOS version number, build number and kernel number on the custom systemd script (useful when troubleshooting) <br>
-3. Code cleanup on the Clover Toolbox <br>
-4. Updated config.plist </p><br>
- 
-<p><b>September 13 2023</b><br>
-1. added notification dialog box after changing themes <br>
-2. resized BMPs and new config for HackBGRT </p><br>
-   
-<p><b>September 12 2023</b><br>
-1. Perform best effort to automatically remove rEFInd if it is previously installed <br>
-2. Clover 5155 - thanks @imfelixlaw for the [PR #23.](https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/pull/23) <br>
-3. Updated config.plist to use Apocalypse theme by default (I chose this theme as this looks good on my Switch Deck!) <br>
-4. Updated config.plist to support Pop!_OS <br>
-5. Updated config.plist to reflect Nobara and Bazzite <br>
-6. New config and new logos for HackBGRT (Windows Internal SSD only) <br>
-7. Clover Toolbox - option to set static theme or random theme <br>
-8. Clover Toolbox - option for DeckHD 1200p screen mod </p><br>
-   
-<p><b>July 30 2023</b><br>
-1. Updated Clover from 5151 to 5154 </p><br>
-
-<p><b>May 24 2023</b><br>
-1. cleanup the Clover Toolbox menu so it is easier to read <br>
-2. cleanup the config.plist </p><br>
-   
-<p><b>May 19 2023</b><br>
-1. bugfix - fixed the issue where it shows duplicate Windows icon when Windows is installed on sdcard / external SSD. <br>
-2. Clover Toolbox - a simple GUI to toggle settings. <br>
-3. added desktop shortcut to easily access Clover Toolbox. <br>
-4. added several Linux distros - CentOS, Debian, Manjaro. </p><br>
-
-<p><b>April 23 2023</b><br>
-1. added new themes - Apocalypse, Crystal, Gothic, Rick and Morty. <br>
-2. re-write the inject systemd service on the other rootfs. <br>
-3. added custom splash screen when booting Windows from the internal SSD. <br>
-4. add Clover Boot Manager Service status as non-Steam game to easily check the systemd service from within Game Mode. </p><br>
-
-<p><b>March 31 2023</b><br>
-1. have a simple menu during install to select which OS will be the default in the Clover GUI boot menu. <br>
-2. implement systemd service / inject systemd service on the other rootfs. </p><br>
-
-<p><b>March 11 2023</b><br>
-1. rewrote the script <a href="https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/issues/7">(thanks arkag!)</a> so it pulls the ISO directly from the Clover repositories. <br>
-2. updated the config.plist so it supports more OS automatically - Kali, Ubuntu and Fedora. </p><br>
-   
-<p><b>February 20 2023</b><br>
-1. added more sanity checks and cleanup in the post-install script. <br>
-2. cleaned up the config.plist so it is more manageable and easier to read. <br>
-3. changed the mouse pointer speed to 20 to close the <a href="https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/issues/3">issue reported here.</a> </p><br>
-
-<p><b>January 26 2023</b><br>
-1. <b>added experimental version (this is what i use)</b> - no need for Windows powershell script / scheduled task. <br>
-2. color coded the install script - if the output is RED then something went wrong. <br>
-3. updated script and scheduled task on the Windows side. <br>
-4. updated config.plist to support Windows, Batocera and Ventoy on microSD / external SSD. <br>
-5. easily add / remove themes via drag and drop / copy-paste in Dolphin file manager. <br>
-6. add multiple themes and Clover will automatically choose a random theme on each reboot. <br>
-7. Catalina and Mojave theme bundled by default. <br>
-8. community contributed icons / logos for SteamOS and Batocera (thanks to WindowsOnDeck reddit members u/ch3vr0n5 and u/ChewyYui). <br>
-9. re-wrote and re-organized the README. </p><br>
-
-<p><b>January 11 2023</b><br>
-1. Initial Release based on <a href="https://github.com/CloverHackyColor/CloverBootloader/releases/tag/5151">Clover v5151.</a> <br>
-2. Does not rename / move Windows EFI entries. <br>
-3. When the dual boot breaks, just boot back manually to SteamOS and it will fix the dual boot entries on its own. <br>
-4. Makes as few changes as possible - doesn't rely on pacman repositories, no systemd scripts and no EasyUEFI. <br>
-5. All-in-One script - install, disable / re-enable, uninstall. </p><br>
-</details>
-
-
-> **NOTE**\
-> If you are going to use this script for a video tutorial, PLEASE reference on your video where you got the script! This will make the support process easier!
-> And don't forget to give a shoutout to [@10MinuteSteamDeckGamer](https://www.youtube.com/@10MinuteSteamDeckGamer/) / ryanrudolf from the Philippines!
->
-
-<b> If you like my work please show support by subscribing to my [YouTube channel @10MinuteSteamDeckGamer.](https://www.youtube.com/@10MinuteSteamDeckGamer/) </b> <br>
-<b> I'm just passionate about Linux, Windows, how stuff works, and playing retro and modern video games on my Steam Deck! </b>
-<p align="center">
-<a href="https://www.youtube.com/@10MinuteSteamDeckGamer/"> <img src="https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/blob/main/10minute.png"/> </a>
-</p>
-
-<b>Monetary donations are also encouraged if you find this project helpful. Your donation inspires me to continue research on the Steam Deck! Clover script, 70Hz mod, SteamOS microSD, Secure Boot, etc.</b>
-
-<b>Scan the QR code or click the image below to visit my donation page.</b>
-
-<p align="center">
-<a href="https://www.paypal.com/donate/?business=VSMP49KYGADT4&no_recurring=0&item_name=Your+donation+inspires+me+to+continue+research+on+the+Steam+Deck%21%0AClover+script%2C+70Hz+mod%2C+SteamOS+microSD%2C+Secure+Boot%2C+etc.%0A%0A&currency_code=CAD"> <img src="https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/blob/main/QRCode.png"/> </a>
-</p>
+If Clover ever appears to hang on a Legion Go (the driver can keep polling the controller), remove the driver and reboot:
+```bash
+sudo rm /esp/efi/clover/drivers/uefi/UsbXbox360Dxe.efi
+```
 
 ## Disclaimer
-1. Do this at your own risk! <br>
-2. This is for educational and research purposes only! <br>
+Do this at your own risk. Provided for educational and research purposes only, with no warranty.
 
-I've created and has been using this script since December 2022 and a lot of users are reporting success too. You are in good hands - I know what I'm doing but I just need the standard disclaimer to protect myself from any liability.
+## Installation (SteamOS / Bazzite)
 
-## [Video Tutorial - How to Install Clover for Steam Deck dual boot](https://www.youtube.com/watch?v=HDnxOw6j3EY&t=975s)
-[Click the image below for a video tutorial and to see the functionalities of the script!](https://www.youtube.com/watch?v=HDnxOw6j3EY&t=975s)
-</b>
-<p align="center">
-<a href="https://www.youtube.com/watch?v=heo2yFycnsM"> <img src="https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/blob/main/banner.png"/> </a>
-</p>
+### Requirements - read this first
+* **Install SteamOS / Bazzite _before_ Windows.** The installer refuses to run if Windows owns the EFI system partition.
+* **Disable Secure Boot** in the BIOS/UEFI - required on non-Steam-Deck handhelds (ROG Ally, Legion Go, etc.).
+* **Set a sudo password** in SteamOS / Bazzite - the installer needs it and will stop if it is blank.
 
-## Quick Install Steps - if you are in a hurry then this is what you need (but really you should read the rest of the README!)
-Perform some Windows config first! Boot to Windows and open elevated command prompt or PowerShell -
+### 1. Prepare Windows
+Boot to Windows and open an elevated Command Prompt or PowerShell, then run:
 1. ```cmd
    bcdedit.exe -set "{globalsettings}" highestmode on
    ```
@@ -216,7 +60,7 @@ Perform some Windows config first! Boot to Windows and open elevated command pro
    reg add "HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\TimeZoneInformation" /v RealTimeIsUniversal /d 1 /t REG_DWORD /f
    ```
 
-Once done, boot to SteamOS to install Clover!
+### 2. Install on SteamOS / Bazzite
 
 > ⚡ **Easy install (SteamOS & Bazzite)** - boot into Desktop Mode, open a terminal (konsole), and paste this single command:
 >
@@ -264,7 +108,7 @@ Once done, boot to SteamOS to install Clover!
     - If the sudo password is blank / not yet set by the end user, the script will prompt to setup the sudo password. Re-run the script to continue.
     - Script will continue to run and perform sanity checks all throughout the install process.
                      
-5. Reboot the Steam Deck. Clover is installed and you should see a GUI to select which OS to boot from! Use the DPAD and press A to confirm your choice. You can also use the trackpad to control the mouse pointer and use the RIGHT SHOULDER BUTTON for LEFT-CLICK.<br>
+5. Reboot your handheld. Clover is installed - you'll see a GUI to choose which OS to boot. Use the D-pad and press A to confirm (see the controller mapping above).<br>
 ![image](https://user-images.githubusercontent.com/98122529/214861561-bb63c209-14ee-492a-a506-2a87665f52d3.png)<br>
 
 **6a. OPTIONAL - If you have Windows installed on SDCARD (not recommended) or External SSD you need to do this additional step -**\
@@ -540,22 +384,6 @@ This can happen if you have an old version of SteamOS installed or have installe
 ![image](https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/assets/98122529/dced41a9-74e3-4dca-a90d-38e0e373614a)
 
 4. Clover will be uninstalled and on next reboot it will automatically load Windows. Clover has been uninstalled!<br>
-</details>
-
-<details>
-<summary><b>Q10. I like your work how do I show a token of appreciation?</b></summary>
-If you like my work please show support by subscribing to my <a href="https://www.youtube.com/@10MinuteSteamDeckGamer">YouTube channel @10MinuteSteamDeckGamer.</a> <br>
-</details>
-
-<details>
-<summary><b>Q11. Do you accept donations?</b></summary>
-Monetary donations are also encouraged if you find this project helpful. Your donation inspires me to continue research on the Steam Deck! Clover script, 70Hz mod, SteamOS microSD, Secure Boot, etc.
-
-Scan the QR code or click the image below to visit my donation page.
-
-<p align="center">
-<a href="https://www.paypal.com/donate/?business=VSMP49KYGADT4&no_recurring=0&item_name=Your+donation+inspires+me+to+continue+research+on+the+Steam+Deck%21%0AClover+script%2C+70Hz+mod%2C+SteamOS+microSD%2C+Secure+Boot%2C+etc.%0A%0A&currency_code=CAD"> <img src="https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot/blob/main/QRCode.png"/> </a>
-</p>
 </details>
 
 ## Known issues
