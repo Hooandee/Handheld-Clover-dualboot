@@ -58,75 +58,36 @@ detect_native_resolution() {
 	return 1
 }
 
-# check if running on Steam Deck OLED or LCD
-if [ "$BOARD_NAME"  = "Jupiter" ] || [ "$BOARD_NAME" = "Galileo" ] 
+# load the device registry and match this device by its DMI strings
+if [ ! -f custom/device-registry.sh ]
 then
-	echo Script is running on supported model - Steam Deck $BOARD_NAME.
-	echo No further edits needed to the config.plist.
-	XPAD_DRIVER=no
-
-# check if running on Lenovo Legion GO S
-elif [ "$PRODUCT_NAME" = "83L3" ] || [ "$PRODUCT_NAME" = "83Q2" ] || [ "$PRODUCT_NAME" = "83Q3" ]
-then
-	echo Script is running on supported model - Legion Go S $PRODUCT_NAME.
-	echo Creating config specific for Legion Go S.
-	set_resolution 1920x1200
-
-# check if running on Lenovo Legion GO S 83N6 (this doesnt work in XBOX 360 UEFI driver so block it)
-elif [ "$PRODUCT_NAME" = "83N6" ]
-then
-	echo Script is running on unsupported model - Legion Go S $PRODUCT_NAME.
-	echo Unsupported device! Exiting immediately.
+	echo Error: custom/device-registry.sh not found - run this script from the repo directory.
 	exit
+fi
+. custom/device-registry.sh
+DEVICE_MATCH=$(lookup_device "$BOARD_NAME" "$PRODUCT_NAME")
 
-# check if running on Lenovo Legion GO
-elif [ "$PRODUCT_NAME" = "83E1" ]
+if [ -n "$DEVICE_MATCH" ]
 then
-	echo Script is running on supported model - Legion Go $PRODUCT_NAME.
-	echo Creating config specific for Legion Go.
-	set_resolution 2560x1600
-
-# check if running on Lenovo Legion Go 2
-elif [ "$PRODUCT_NAME" = "83N0" ] || [ "$PRODUCT_NAME" = "83N1" ]
-then
-	echo Script is running on supported model - Legion Go 2 $PRODUCT_NAME.
-	echo Creating config specific for Legion Go 2.
-	set_resolution 1920x1200
-
-# check if running on Asus ROG Ally
-elif [ "$BOARD_NAME" = "RC71L" ]
-then
-	echo Script is running on supported model - Asus ROG Ally $BOARD_NAME.
-	echo Creating config specific for Asus ROG Ally.
-	set_resolution 1920x1080
-
-# check if running on Asus ROG Ally X
-elif [ "$BOARD_NAME" = "RC72LA" ]
-then
-	echo Script is running on supported model - Asus ROG Ally X $BOARD_NAME.
-	echo Creating config specific for Asus ROG Ally X.
-	set_resolution 1920x1080
-
-# check if running on Asus ROG Xbox Ally
-elif [ "$BOARD_NAME" = "RC73YA" ]
-then
-	echo Script is running on supported model - Asus ROG Xbox Ally $BOARD_NAME.
-	echo Creating config specific for Asus ROG Xbox Ally.
-	set_resolution 1920x1080
-
-# check if running on Asus ROG Xbox Ally X
-elif [ "$BOARD_NAME" = "RC73XA" ]
-then
-	echo Script is running on supported model - Asus ROG Xbox Ally X $BOARD_NAME.
-	echo Creating config specific for Asus ROG Xbox Ally X.
-	set_resolution 1920x1080
-
-# check if running on Onexplayer 2 Pro
-elif [ "$PRODUCT_NAME" = "ONEXPLAYER 2 PRO ARP23P" ]
-then
-	echo Script is running on supported model - Onexplayer 2 Pro $PRODUCT_NAME.
-	echo Creating config specific for Onexplayer 2 Pro.
-	set_resolution 2560x1600
+	DEVICE_NAME=${DEVICE_MATCH%|*}
+	DEVICE_ACTION=${DEVICE_MATCH##*|}
+	case "$DEVICE_ACTION" in
+		blocked)
+			echo Script is running on unsupported model - $DEVICE_NAME.
+			echo Unsupported device! Exiting immediately.
+			exit
+			;;
+		nodriver)
+			echo Script is running on supported model - $DEVICE_NAME.
+			echo No further edits needed to the config.plist.
+			XPAD_DRIVER=no
+			;;
+		*)
+			echo Script is running on supported model - $DEVICE_NAME.
+			echo Creating config specific for $DEVICE_NAME.
+			set_resolution "$DEVICE_ACTION"
+			;;
+	esac
 
 # unknown device - fall back to generic handheld mode (experimental)
 else
