@@ -10,6 +10,10 @@ set -u
 
 CTL_VERSION="1.0.0"
 
+# the ESP is tiny (~25MB free), so cap how many theme folders may live on it
+THEME_LIMIT=5
+CLOVERTHEMES_REPO=${CLOVERTHEMES_REPO:-CloverHackyColor/CloverThemes}
+
 detect_os() {
 	if grep -qi bazzite /etc/os-release 2> /dev/null
 	then
@@ -22,10 +26,13 @@ detect_os() {
 	fi
 }
 detect_os
+# CLOVER_EFI_PATH lets the tests point the theme commands at a throwaway tree
+EFI_PATH=${CLOVER_EFI_PATH:-$EFI_PATH}
 CONFIG=${CLOVER_CONFIG:-${EFI_PATH:+$EFI_PATH/clover/config.plist}}
 
 die() { echo "clover-ctl: $1" >&2; exit 1; }
 need_efi() { [ -n "$EFI_PATH" ] || die "not running on SteamOS or Bazzite"; }
+valid_theme_name() { case "$1" in ''|*/*|*..*) die "invalid theme name: $1" ;; esac; }
 
 # root is required for the real install paths; the test suite opts out explicitly
 need_root() {
@@ -105,9 +112,9 @@ status)
 	else service=absent; fi
 	if [ -n "$EFI_PATH" ] && [ -e "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" ]; then winactive=yes; else winactive=no; fi
 	IFS='|' read -r res theme timeout loader volume < <(plist_get_all "$CONFIG")
-	printf '{"os":"%s","installed":%s,"resolution":"%s","theme":"%s","timeout":"%s","default_os":"%s","service":"%s","windows_active":%s}\n' \
+	printf '{"os":"%s","installed":%s,"resolution":"%s","theme":"%s","timeout":"%s","default_os":"%s","service":"%s","windows_active":%s,"theme_limit":%d}\n' \
 		"$OS" "$(json_bool $installed)" "$res" "$theme" "$timeout" \
-		"$(default_os_label "$loader" "$volume")" "$service" "$(json_bool $winactive)"
+		"$(default_os_label "$loader" "$volume")" "$service" "$(json_bool $winactive)" "$THEME_LIMIT"
 	;;
 get)
 	case "${1:-}" in
@@ -121,6 +128,86 @@ get)
 list-themes)
 	need_efi
 	ls "$EFI_PATH/clover/themes" 2> /dev/null
+	;;
+list-remote-themes)
+	# top-level folders of the CloverThemes repo = installable themes
+	api="https://api.github.com/repos/$CLOVERTHEMES_REPO/contents"
+	curl -fsSL -H "Accept: application/vnd.github+json" "$api" 2> /dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+for e in data:
+    if e.get("type") == "dir" and not e.get("name", "").startswith("."):
+        print(e["name"])
+' || die "could not fetch the theme list - check your connection"
+	;;
+install-theme)
+	need_root; need_efi
+	name=${1:-}
+	[ -n "$name" ] || die "usage: clover-ctl install-theme <name>"
+	valid_theme_name "$name"
+	themes="$EFI_PATH/clover/themes"
+	[ -d "$themes/$name" ] && die "theme already installed: $name"
+	count=$(find "$themes" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | wc -l)
+	[ "$count" -ge "$THEME_LIMIT" ] && die "theme limit reached ($THEME_LIMIT) - remove a theme first"
+	tmp=$(mktemp -d)
+	# pull only this theme's files: walk the git tree, fetch matching blobs raw
+	if ! python3 - "$CLOVERTHEMES_REPO" "$name" "$tmp" <<'PY'
+import json, os, sys, urllib.parse, urllib.request
+from concurrent.futures import ThreadPoolExecutor
+repo, name, dest = sys.argv[1], sys.argv[2], sys.argv[3]
+def get(url):
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "clover-ctl"})
+    return urllib.request.urlopen(req, timeout=30)
+try:
+    branch = json.load(get(f"https://api.github.com/repos/{repo}")).get("default_branch", "master")
+    tree = json.load(get(f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1")).get("tree", [])
+except Exception as e:
+    sys.exit(f"fetch failed: {e}")
+prefix = name + "/"
+blobs = [t for t in tree if t.get("type") == "blob" and t.get("path", "").startswith(prefix)]
+if not blobs:
+    sys.exit(f"theme not found in repo: {name}")
+def fetch(t):
+    out = os.path.join(dest, t["path"][len(prefix):])
+    os.makedirs(os.path.dirname(out) or dest, exist_ok=True)
+    url = f"https://raw.githubusercontent.com/{repo}/{branch}/" + urllib.parse.quote(t["path"])
+    with get(url) as r, open(out, "wb") as f:
+        f.write(r.read())
+# many small files over wifi - overlap the round-trips
+with ThreadPoolExecutor(max_workers=8) as ex:
+    for _ in ex.map(fetch, blobs):
+        pass
+PY
+	then
+		rm -rf "$tmp"; die "could not download theme: $name"
+	fi
+	# make sure it fits before touching the ESP, keeping headroom for config.plist
+	# rewrites (du under-reports vfat cluster rounding, so reserve a margin)
+	ESP_RESERVE_KB=2048
+	need_kb=$(du -sk "$tmp" 2> /dev/null | cut -f1)
+	free_kb=$(df -Pk "$EFI_PATH" 2> /dev/null | awk 'NR==2 {print $4}')
+	if [ -n "$need_kb" ] && [ -n "$free_kb" ] && [ "$((need_kb + ESP_RESERVE_KB))" -gt "$free_kb" ]
+	then
+		rm -rf "$tmp"; die "theme '$name' needs ${need_kb}KB but only ${free_kb}KB free on the ESP"
+	fi
+	mkdir -p "$themes"
+	# tmp is on tmpfs and the ESP is vfat, so this mv copies - clean up a partial dir if it fails
+	mv "$tmp" "$themes/$name" || { rm -rf "$tmp" "$themes/$name"; die "failed to install theme: $name"; }
+	echo "theme installed: $name"
+	;;
+remove-theme)
+	need_root; need_efi
+	name=${1:-}
+	[ -n "$name" ] || die "usage: clover-ctl remove-theme <name>"
+	valid_theme_name "$name"
+	dir="$EFI_PATH/clover/themes/$name"
+	[ -d "$dir" ] || die "theme not installed: $name"
+	[ "$name" = "$(plist_get Theme "$CONFIG")" ] && die "cannot remove the active theme '$name' - switch themes first"
+	rm -rf "$dir"
+	echo "theme removed: $name"
 	;;
 detect-resolution)
 	detect_native_resolution
@@ -307,7 +394,7 @@ theme-preview)
 	need_root; need_efi
 	name=${1:-}
 	[ -n "$name" ] || die "usage: clover-ctl theme-preview <name>"
-	case "$name" in */*) die "invalid theme name" ;; esac
+	valid_theme_name "$name"
 	dir="$EFI_PATH/clover/themes/$name"
 	[ -d "$dir" ] || die "theme not found: $name"
 	tmp="/tmp/clover-theme-preview"
@@ -336,6 +423,9 @@ clover-ctl <command> [args]
   status                                            current config + state as JSON
   get <resolution|theme|timeout|default-os>         read one value
   list-themes                                       installed Clover themes
+  list-remote-themes                                themes available in the CloverThemes repo
+  install-theme <name>                              (root) download + install a theme (max 5 on the ESP)
+  remove-theme <name>                               (root) delete an installed theme (not the active one)
   detect-resolution                                 native panel resolution
   version                                           print the tool version
   set-resolution <WxH|auto>                         (root)

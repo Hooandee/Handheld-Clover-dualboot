@@ -1,0 +1,16 @@
+# --- Internal agent / local docs (never pushed) ---
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
+# --- OS / editor cruft ---
+.DS_Store
+*.swp
+*~
+
+# --- Build / runtime artifacts ---
+# (decky/ has its own .gitignore for node_modules + dist)
+*.log
+~/temp-ESP
+__pycache__/
+*.pyc
