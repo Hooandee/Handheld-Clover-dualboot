@@ -58,75 +58,36 @@ detect_native_resolution() {
 	return 1
 }
 
-# check if running on Steam Deck OLED or LCD
-if [ "$BOARD_NAME"  = "Jupiter" ] || [ "$BOARD_NAME" = "Galileo" ] 
+# load the device registry and match this device by its DMI strings
+if [ ! -f custom/device-registry.sh ]
 then
-	echo Script is running on supported model - Steam Deck $BOARD_NAME.
-	echo No further edits needed to the config.plist.
-	XPAD_DRIVER=no
-
-# check if running on Lenovo Legion GO S
-elif [ "$PRODUCT_NAME" = "83L3" ] || [ "$PRODUCT_NAME" = "83Q2" ] || [ "$PRODUCT_NAME" = "83Q3" ]
-then
-	echo Script is running on supported model - Legion Go S $PRODUCT_NAME.
-	echo Creating config specific for Legion Go S.
-	set_resolution 1920x1200
-
-# check if running on Lenovo Legion GO S 83N6 (this doesnt work in XBOX 360 UEFI driver so block it)
-elif [ "$PRODUCT_NAME" = "83N6" ]
-then
-	echo Script is running on unsupported model - Legion Go S $PRODUCT_NAME.
-	echo Unsupported device! Exiting immediately.
+	echo Error: custom/device-registry.sh not found - run this script from the repo directory.
 	exit
+fi
+. custom/device-registry.sh
+DEVICE_MATCH=$(lookup_device "$BOARD_NAME" "$PRODUCT_NAME")
 
-# check if running on Lenovo Legion GO
-elif [ "$PRODUCT_NAME" = "83E1" ]
+if [ -n "$DEVICE_MATCH" ]
 then
-	echo Script is running on supported model - Legion Go $PRODUCT_NAME.
-	echo Creating config specific for Legion Go.
-	set_resolution 2560x1600
-
-# check if running on Lenovo Legion Go 2
-elif [ "$PRODUCT_NAME" = "83N0" ] || [ "$PRODUCT_NAME" = "83N1" ]
-then
-	echo Script is running on supported model - Legion Go 2 $PRODUCT_NAME.
-	echo Creating config specific for Legion Go 2.
-	set_resolution 1920x1200
-
-# check if running on Asus ROG Ally
-elif [ "$BOARD_NAME" = "RC71L" ]
-then
-	echo Script is running on supported model - Asus ROG Ally $BOARD_NAME.
-	echo Creating config specific for Asus ROG Ally.
-	set_resolution 1920x1080
-
-# check if running on Asus ROG Ally X
-elif [ "$BOARD_NAME" = "RC72LA" ]
-then
-	echo Script is running on supported model - Asus ROG Ally X $BOARD_NAME.
-	echo Creating config specific for Asus ROG Ally X.
-	set_resolution 1920x1080
-
-# check if running on Asus ROG Xbox Ally
-elif [ "$BOARD_NAME" = "RC73YA" ]
-then
-	echo Script is running on supported model - Asus ROG Xbox Ally $BOARD_NAME.
-	echo Creating config specific for Asus ROG Xbox Ally.
-	set_resolution 1920x1080
-
-# check if running on Asus ROG Xbox Ally X
-elif [ "$BOARD_NAME" = "RC73XA" ]
-then
-	echo Script is running on supported model - Asus ROG Xbox Ally X $BOARD_NAME.
-	echo Creating config specific for Asus ROG Xbox Ally X.
-	set_resolution 1920x1080
-
-# check if running on Onexplayer 2 Pro
-elif [ "$PRODUCT_NAME" = "ONEXPLAYER 2 PRO ARP23P" ]
-then
-	echo Script is running on supported model - Onexplayer 2 Pro $PRODUCT_NAME.
-	echo Creating config specific for Onexplayer 2 Pro.
-	set_resolution 2560x1600
+	DEVICE_NAME=${DEVICE_MATCH%|*}
+	DEVICE_ACTION=${DEVICE_MATCH##*|}
+	case "$DEVICE_ACTION" in
+		blocked)
+			echo Script is running on unsupported model - $DEVICE_NAME.
+			echo Unsupported device! Exiting immediately.
+			exit
+			;;
+		nodriver)
+			echo Script is running on supported model - $DEVICE_NAME.
+			echo No further edits needed to the config.plist.
+			XPAD_DRIVER=no
+			;;
+		*)
+			echo Script is running on supported model - $DEVICE_NAME.
+			echo Creating config specific for $DEVICE_NAME.
+			set_resolution "$DEVICE_ACTION"
+			;;
+	esac
 
 # unknown device - fall back to generic handheld mode (experimental)
 else
@@ -145,7 +106,12 @@ else
 		echo Could not auto-detect the resolution - the Clover default 1280x800 will be used.
 		echo You can change it later from the Clover Toolbox.
 	fi
-	read -p "Proceed in generic handheld mode? (y/N): " GENERIC_CONFIRM
+	if [ "${CLOVER_NONINTERACTIVE:-}" = 1 ]
+	then
+		GENERIC_CONFIRM=y
+	else
+		read -p "Proceed in generic handheld mode? (y/N): " GENERIC_CONFIRM
+	fi
 	if [ "$GENERIC_CONFIRM" != "y" ] && [ "$GENERIC_CONFIRM" != "Y" ]
 	then
 		echo Aborting at user request.
@@ -192,7 +158,18 @@ else
 	echo Dual boot configuration supported.
 fi
 
-if [ "$(passwd --status $(whoami) | tr -s " " | cut -d " " -f 2)" == "P" ]
+if [ -n "${CLOVER_SUDO_PASS:-}" ]
+then
+	current_password="$CLOVER_SUDO_PASS"
+	echo -e "$current_password\n" | sudo -S ls &> /dev/null
+	if [ $? -eq 0 ]
+	then
+		echo Sudo password is good!
+	else
+		echo Sudo password is wrong! Exiting.
+		exit
+	fi
+elif [ "$(passwd --status $(whoami) | tr -s " " | cut -d " " -f 2)" == "P" ]
 then
 	read -s -p "Please enter current sudo password: " current_password ; echo
 	echo Checking if the sudo password is correct.
@@ -388,9 +365,12 @@ cp custom/Clover-Toolbox.sh ~/1Clover-tools &> /dev/null
 echo -e "$current_password\n" | sudo -S cp custom/clover-bootmanager.service custom/clover-bootmanager.sh /etc/systemd/system
 cp -R custom/logos ~/1Clover-tools &> /dev/null
 cp -R custom/efi ~/1Clover-tools &> /dev/null
+cp clover-ctl ~/1Clover-tools &> /dev/null
+cp -R gui ~/1Clover-tools &> /dev/null
+cp -R decky ~/1Clover-tools &> /dev/null
 
 # make the scripts executable
-chmod +x ~/1Clover-tools/Clover-Toolbox.sh
+chmod +x ~/1Clover-tools/Clover-Toolbox.sh ~/1Clover-tools/clover-ctl ~/1Clover-tools/gui/clover-desktop
 echo -e "$current_password\n" | sudo -S chmod +x /etc/systemd/system/clover-bootmanager.sh
 
 # start the clover-bootmanager.service
@@ -424,5 +404,13 @@ fi
 # create desktop icon for Clover Toolbox
 ln -s ~/1Clover-tools/Clover-Toolbox.sh ~/Desktop/Clover-Toolbox &> /dev/null
 echo -e Desktop icon for Clover Toolbox has been created!
+
+# install the Clover desktop app launcher (apps menu + desktop shortcut)
+mkdir -p ~/.local/share/applications
+sed -e "s|^Exec=.*|Exec=$HOME/1Clover-tools/gui/clover-desktop|" -e "s|^Icon=.*|Icon=$HOME/1Clover-tools/gui/clover.png|" ~/1Clover-tools/gui/clover-dualboot.desktop > ~/.local/share/applications/clover-dualboot.desktop
+chmod +x ~/.local/share/applications/clover-dualboot.desktop
+cp ~/.local/share/applications/clover-dualboot.desktop ~/Desktop/ &> /dev/null
+chmod +x ~/Desktop/clover-dualboot.desktop &> /dev/null
+echo Clover desktop app has been installed!
 
 echo Clover install completed on $OS!

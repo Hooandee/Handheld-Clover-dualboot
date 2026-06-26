@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Clover Dual Boot
+Comment=Configure Clover dual boot - default OS, resolution, theme, timeout
+# The installer rewrites Exec with the absolute path to clover-desktop.
+Exec=clover-desktop
+Icon=clover
+Terminal=false
+Categories=System;Settings;
