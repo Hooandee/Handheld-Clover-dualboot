@@ -1,7 +1,7 @@
 @echo off
 cls
-echo Clover Windows install script by ryanrudolf
-echo https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot
+echo Clover Windows install script
+echo Created by ryanrudolf, extended by Hooandee
 echo.
 ping -n 3 localhost > nul
 

@@ -3,9 +3,8 @@
 clear
 
 
-echo Clover Dual Boot Install Script for SteamOS and Bazzite by ryanrudolf
-echo https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot
-echo YT - 10MinuteSteamDeckGamer \| https://youtube.com/\@10MinuteSteamDeckGamer
+echo Clover Dual Boot Install Script for SteamOS and Bazzite
+echo Created by ryanrudolf, extended by Hooandee
 echo Doing preliminary sanity checks ...
 sleep 2
 

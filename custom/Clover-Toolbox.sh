@@ -30,7 +30,7 @@ fi
 
 while true
 do
-Choice=$(zenity --width 750 --height 450 --list --radiolist --multiple 	--title "Clover Toolbox for Clover script  - https://github.com/ryanrudolfoba/SteamDeck-clover-dualboot"\
+Choice=$(zenity --width 750 --height 450 --list --radiolist --multiple 	--title "Clover Toolbox - created by ryanrudolf, extended by Hooandee"\
 	--column "Select One" \
 	--column "Option" \
 	--column="Description - Read this carefully!"\
