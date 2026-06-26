@@ -39,7 +39,7 @@ TIMEOUTS = ["1", "5", "10", "15", "60"]
 DEFAULT_OS = [("Windows", "windows"), ("SteamOS", "steamos"),
               ("Bazzite", "bazzite"), ("Last used", "lastos")]
 
-ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clover.svg")
+ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clover.png")
 
 QSS = """
 QListWidget#sidebar { background: #20242b; border: none; outline: 0; padding-top: 8px; }

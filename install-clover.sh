@@ -407,7 +407,7 @@ echo -e Desktop icon for Clover Toolbox has been created!
 
 # install the Clover desktop app launcher (apps menu + desktop shortcut)
 mkdir -p ~/.local/share/applications
-sed -e "s|^Exec=.*|Exec=$HOME/1Clover-tools/gui/clover-desktop|" -e "s|^Icon=.*|Icon=$HOME/1Clover-tools/gui/clover.svg|" ~/1Clover-tools/gui/clover-dualboot.desktop > ~/.local/share/applications/clover-dualboot.desktop
+sed -e "s|^Exec=.*|Exec=$HOME/1Clover-tools/gui/clover-desktop|" -e "s|^Icon=.*|Icon=$HOME/1Clover-tools/gui/clover.png|" ~/1Clover-tools/gui/clover-dualboot.desktop > ~/.local/share/applications/clover-dualboot.desktop
 chmod +x ~/.local/share/applications/clover-dualboot.desktop
 cp ~/.local/share/applications/clover-dualboot.desktop ~/Desktop/ &> /dev/null
 chmod +x ~/Desktop/clover-dualboot.desktop &> /dev/null
