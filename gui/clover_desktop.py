@@ -86,6 +86,10 @@ class Engine:
         rc, out, _ = self.run(["list-themes"], parent)
         return out.splitlines() if rc == 0 and out else []
 
+    def logos(self, parent):
+        rc, out, _ = self.run(["list-logos"], parent, root=False)
+        return out.splitlines() if rc == 0 and out else []
+
 
 class CloverWindow(QMainWindow):
     def __init__(self):
@@ -112,6 +116,7 @@ class CloverWindow(QMainWindow):
             ("Display", "video-display", QStyle.StandardPixmap.SP_DesktopIcon, self._display_page),
             ("Themes", "preferences-desktop-theme", QStyle.StandardPixmap.SP_FileDialogContentsView, self._themes_page),
             ("Game Mode", "input-gaming", QStyle.StandardPixmap.SP_ComputerIcon, self._gamemode_page),
+            ("Advanced", "applications-system", QStyle.StandardPixmap.SP_FileDialogDetailedView, self._advanced_page),
         ]
         for title, icon_name, fallback, builder in pages:
             self.sidebar.addItem(QListWidgetItem(self._icon(icon_name, fallback), title))
@@ -214,6 +219,20 @@ class CloverWindow(QMainWindow):
         form.addRow("Clover theme", self._apply_row(self.theme_combo, self.apply_theme))
         v.addLayout(form)
         v.addWidget(QLabel("Themes live on the EFI partition. \"random\" rotates on each boot."))
+        v.addSpacing(14)
+        v.addWidget(QLabel("<b>Boot logo</b>"))
+        logo_row = QWidget()
+        lh = QHBoxLayout(logo_row)
+        lh.setContentsMargins(0, 0, 0, 0)
+        self.logo_combo = QComboBox()
+        lh.addWidget(self.logo_combo, 1)
+        set_logo = QPushButton("Set")
+        set_logo.clicked.connect(self.apply_logo)
+        reset_logo = QPushButton("Restore default")
+        reset_logo.clicked.connect(self.reset_logo)
+        lh.addWidget(set_logo)
+        lh.addWidget(reset_logo)
+        v.addWidget(logo_row)
         v.addStretch(1)
         return page
 
@@ -225,6 +244,23 @@ class CloverWindow(QMainWindow):
                           "Install / update Decky plugin")
         btn.clicked.connect(self.install_decky)
         v.addWidget(btn)
+        v.addStretch(1)
+        return page
+
+    def _advanced_page(self):
+        page, v = self._page("Advanced")
+        form = QFormLayout()
+        self.batocera_combo = QComboBox()
+        self.batocera_combo.addItems(["v39 (and newer)", "v38 (and older)"])
+        form.addRow("Batocera version", self._apply_row(self.batocera_combo, self.apply_batocera))
+        v.addLayout(form)
+        v.addWidget(QLabel("Only needed if you boot Batocera from a microSD / USB."))
+        v.addSpacing(16)
+        v.addWidget(QLabel("<b>Danger zone</b>"))
+        v.addWidget(QLabel("Remove Clover and restore the Windows bootloader."))
+        uninstall = QPushButton(self._icon("edit-delete", QStyle.StandardPixmap.SP_TrashIcon), "Uninstall Clover")
+        uninstall.clicked.connect(self.uninstall)
+        v.addWidget(uninstall)
         v.addStretch(1)
         return page
 
@@ -245,6 +281,10 @@ class CloverWindow(QMainWindow):
             if themes:
                 self.theme_combo.addItems(themes)
         self._select(self.theme_combo, st.get("theme"))
+        if self.logo_combo.count() == 0:
+            logos = self.engine.logos(self)
+            if logos:
+                self.logo_combo.addItems(logos)
         self.statusBar().showMessage("Ready")
 
     def _select(self, combo, value):
@@ -302,6 +342,32 @@ class CloverWindow(QMainWindow):
             QMessageBox.information(self, "Clover", f"Bug report saved to:\n{out}")
         elif err != "cancelled":
             QMessageBox.warning(self, "Clover", err or out or "Could not write the report.")
+
+    def apply_logo(self):
+        if self.logo_combo.currentText():
+            self._apply(["set-logo", self.logo_combo.currentText()], "Boot logo updated.")
+
+    def reset_logo(self):
+        self._apply(["reset-logo"], "Boot logo restored to default.")
+
+    def apply_batocera(self):
+        value = "v39" if self.batocera_combo.currentIndex() == 0 else "v38"
+        self._apply(["set-batocera", value], f"Batocera config set to {value}.")
+
+    def uninstall(self):
+        if QMessageBox.warning(
+                self, "Uninstall Clover",
+                "This removes Clover and restores the Windows bootloader. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        rc, out, err = self.engine.run(["uninstall"], self)
+        if rc == 0:
+            QMessageBox.information(self, "Clover",
+                                    (out or "Clover uninstalled.") + "\n\nReboot to return to Windows.")
+            self.close()
+        elif err != "cancelled":
+            QMessageBox.warning(self, "Clover", err or out or "Uninstall failed.")
 
 
 def main():

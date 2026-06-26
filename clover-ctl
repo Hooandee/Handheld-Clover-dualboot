@@ -235,6 +235,69 @@ diagnostics)
 	chown "$user":"$user" "$out" 2> /dev/null || true
 	echo "$out"
 	;;
+set-batocera)
+	need_root
+	case "${1:-}" in
+		v39) loader='\efi\batocera\grubx64.efi' ;;
+		v38) loader='\efi\boot\bootx64.efi' ;;
+		*) die "usage: clover-ctl set-batocera <v38|v39>" ;;
+	esac
+	PLIST_VAL="$loader" awk '
+		s == 2 { print "\t\t\t\t\t<string>" ENVIRON["PLIST_VAL"] "</string>"; s = 0; next }
+		s == 1 { s = 2; print; next }
+		{ print }
+		/<string>os_batocera<\/string>/ { s = 1 }
+	' "$CONFIG" > "$CONFIG.cloverctl.tmp" && mv "$CONFIG.cloverctl.tmp" "$CONFIG"
+	echo "batocera config set to $1"
+	;;
+list-logos)
+	home=$(getent passwd "${SUDO_USER:-$(id -un 1000 2> /dev/null)}" | cut -d: -f6)
+	[ -n "$home" ] || home="$HOME"
+	ls "$home/1Clover-tools/logos" 2> /dev/null | grep -i '\.png$'
+	;;
+set-logo)
+	need_root; need_efi
+	home=$(getent passwd "${SUDO_USER:-$(id -un 1000 2> /dev/null)}" | cut -d: -f6)
+	[ -n "$home" ] || home="$HOME"
+	[ -n "${1:-}" ] || die "usage: clover-ctl set-logo <name.png>"
+	src="$home/1Clover-tools/logos/$1"
+	[ -f "$src" ] || die "logo not found: $src"
+	mkdir -p "$EFI_PATH/steamos"
+	cp "$src" "$EFI_PATH/steamos/steamos.png"
+	echo "boot logo set to $1"
+	;;
+reset-logo)
+	need_root; need_efi
+	rm -f "$EFI_PATH/steamos/steamos.png"
+	echo "boot logo restored to default"
+	;;
+uninstall)
+	need_root; need_efi
+	home=$(getent passwd "${SUDO_USER:-$(id -un 1000 2> /dev/null)}" | cut -d: -f6)
+	[ -n "$home" ] || home="$HOME"
+	if [ -f "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" ]
+	then
+		mv "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" && rm -f "$EFI_PATH/Microsoft/bootmgfw.efi"
+	fi
+	[ -f "$BOOTX64.orig" ] && mv "$BOOTX64.orig" "$BOOTX64"
+	rm -rf "$EFI_PATH/clover"
+	rm -f "$EFI_PATH/steamos/steamos.png"
+	for e in $(efibootmgr 2> /dev/null | grep "Clover - GUI" | colrm 9 | colrm 1 4)
+	do
+		efibootmgr -b "$e" -B &> /dev/null
+	done
+	ro=$(command -v steamos-readonly)
+	[ -n "$ro" ] && steamos-readonly disable 2> /dev/null
+	systemctl disable --now clover-bootmanager.service &> /dev/null
+	rm -f /etc/systemd/system/clover-bootmanager*
+	systemctl daemon-reload 2> /dev/null
+	rm -f /etc/atomic-update.conf.d/clover-whitelist.conf
+	[ -n "$ro" ] && steamos-readonly enable 2> /dev/null
+	rm -f "$home/.local/share/kservices5/ServiceMenus/open_as_root.desktop"
+	rm -f "$home/.local/share/applications/clover-dualboot.desktop" "$home/Desktop/clover-dualboot.desktop" "$home/Desktop/Clover-Toolbox"
+	rm -rf "$home/1Clover-tools"
+	echo "Clover uninstalled - reboot to return to Windows."
+	;;
 help|--help|-h)
 	cat <<'USAGE'
 clover-ctl <command> [args]
@@ -249,6 +312,11 @@ clover-ctl <command> [args]
   service <enable|disable>                          (root) enable Clover, or hand next boot to Windows
   install-decky                                     (root) install/update the Decky (Game Mode) plugin
   diagnostics                                       (root) write a bug-report bundle to your home folder
+  set-batocera <v38|v39>                            (root) point the Batocera entry at the right loader
+  list-logos                                        list available boot logos
+  set-logo <name.png>                               (root) set the boot (BGRT) logo
+  reset-logo                                        (root) restore the default boot logo
+  uninstall                                         (root) remove Clover and restore the Windows bootloader
 USAGE
 	;;
 *)
