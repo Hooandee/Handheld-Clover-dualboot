@@ -9,6 +9,7 @@ CTL="$DIR/clover-ctl"
 TMP=$(mktemp)
 cp "$DIR/custom/config.plist" "$TMP"
 export CLOVER_CONFIG="$TMP"
+export CLOVER_CTL_ALLOW_NONROOT=1
 
 fail=0
 expect() { # description actual expected

@@ -35,11 +35,11 @@ function Content() {
 
   const refresh = async () => {
     setStatus(await getStatus());
-    setThemes(await listThemes());
   };
 
   useEffect(() => {
     refresh();
+    listThemes().then(setThemes);
   }, []);
 
   const osOptions = [

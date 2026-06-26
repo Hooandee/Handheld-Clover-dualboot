@@ -1,21 +1,26 @@
-name: shellcheck
+name: lint and test
 
 on:
   push:
   pull_request:
 
 jobs:
-  shellcheck:
+  lint-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Non-blocking on purpose: surface findings without failing the build on
-      # the existing backlog. Flip continue-on-error to false (and raise the
-      # severity) once the warnings are cleared, to make it a hard gate.
-      - name: Run shellcheck
+      # Advisory: surface shellcheck findings without failing the build on the
+      # existing backlog. Tighten later by dropping continue-on-error.
+      - name: shellcheck
         continue-on-error: true
         run: |
           shellcheck --version
           find . -path ./.git -prune -o -name '*.sh' -print0 \
             | xargs -0 -r shellcheck --severity=warning
+          shellcheck --severity=warning clover-ctl
+
+      - name: tests
+        run: |
+          bash test/test-device-detection.sh
+          bash test/test-clover-ctl.sh

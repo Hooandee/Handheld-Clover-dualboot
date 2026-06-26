@@ -25,10 +25,9 @@ CONFIG=${CLOVER_CONFIG:-${EFI_PATH:+$EFI_PATH/clover/config.plist}}
 die() { echo "clover-ctl: $1" >&2; exit 1; }
 need_efi() { [ -n "$EFI_PATH" ] || die "not running on SteamOS or Bazzite"; }
 
-# root is required for the real install paths; skipped when CLOVER_CONFIG points
-# the tool at a test file the current user already owns
+# root is required for the real install paths; the test suite opts out explicitly
 need_root() {
-	[ -n "${CLOVER_CONFIG:-}" ] && return 0
+	[ "${CLOVER_CTL_ALLOW_NONROOT:-}" = 1 ] && return 0
 	[ "$(id -u)" = 0 ] || die "must run as root (try: sudo clover-ctl $CMD ...)"
 }
 
@@ -65,17 +64,30 @@ detect_native_resolution() {
 	return 1
 }
 
-default_os_from_config() {
-	local loader volume
-	loader=$(plist_get DefaultLoader "$CONFIG" | tr 'A-Z' 'a-z')
-	volume=$(plist_get DefaultVolume "$CONFIG")
-	case "$volume" in *LastBootedVolume*) echo lastos; return ;; esac
+# map a DefaultLoader path + DefaultVolume to a friendly OS name (loader paths in
+# config.plist are mixed/upper case, so lowercase before matching)
+default_os_label() {
+	local loader; loader=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
+	case "$2" in *LastBootedVolume*) echo lastos; return ;; esac
 	case "$loader" in
 		*microsoft*) echo windows ;;
 		*steamcl*) echo steamos ;;
 		*fedora*|*shimx64*) echo bazzite ;;
 		*) echo unknown ;;
 	esac
+}
+
+# read every status field in a single pass: resolution|theme|timeout|loader|volume
+plist_get_all() {
+	awk '
+		function val(s) { sub(/^[[:space:]]*<[^>]*>/, "", s); sub(/<\/[^>]*>[[:space:]]*$/, "", s); return s }
+		/<key>ScreenResolution<\/key>/ { getline; r = val($0) }
+		/<key>Theme<\/key>/            { getline; t = val($0) }
+		/<key>Timeout<\/key>/          { getline; o = val($0) }
+		/<key>DefaultLoader<\/key>/    { getline; l = val($0) }
+		/<key>DefaultVolume<\/key>/    { getline; v = val($0) }
+		END { print r "|" t "|" o "|" l "|" v }
+	' "$1" 2> /dev/null
 }
 
 json_bool() { [ "$1" = yes ] && echo true || echo false; }
@@ -90,18 +102,17 @@ status)
 	elif systemctl list-unit-files clover-bootmanager.service &> /dev/null; then service=disabled
 	else service=absent; fi
 	if [ -n "$EFI_PATH" ] && [ -e "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" ]; then winactive=yes; else winactive=no; fi
+	IFS='|' read -r res theme timeout loader volume < <(plist_get_all "$CONFIG")
 	printf '{"os":"%s","installed":%s,"resolution":"%s","theme":"%s","timeout":"%s","default_os":"%s","service":"%s","windows_active":%s}\n' \
-		"$OS" "$(json_bool $installed)" \
-		"$(plist_get ScreenResolution "$CONFIG")" "$(plist_get Theme "$CONFIG")" \
-		"$(plist_get Timeout "$CONFIG")" "$(default_os_from_config)" \
-		"$service" "$(json_bool $winactive)"
+		"$OS" "$(json_bool $installed)" "$res" "$theme" "$timeout" \
+		"$(default_os_label "$loader" "$volume")" "$service" "$(json_bool $winactive)"
 	;;
 get)
 	case "${1:-}" in
 		resolution) plist_get ScreenResolution "$CONFIG" ;;
 		theme) plist_get Theme "$CONFIG" ;;
 		timeout) plist_get Timeout "$CONFIG" ;;
-		default-os) default_os_from_config ;;
+		default-os) default_os_label "$(plist_get DefaultLoader "$CONFIG")" "$(plist_get DefaultVolume "$CONFIG")" ;;
 		*) die "usage: clover-ctl get <resolution|theme|timeout|default-os>" ;;
 	esac
 	;;

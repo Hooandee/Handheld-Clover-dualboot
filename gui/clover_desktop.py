@@ -181,11 +181,11 @@ class CloverWindow(QWidget):
         for i, (_, value) in enumerate(DEFAULT_OS):
             if value == st.get("default_os"):
                 self.default_combo.setCurrentIndex(i)
-        themes = self.engine.themes(self)
-        if themes:
-            self.theme_combo.clear()
-            self.theme_combo.addItems(themes)
-            self._select(self.theme_combo, st.get("theme"))
+        if self.theme_combo.count() == 0:
+            themes = self.engine.themes(self)
+            if themes:
+                self.theme_combo.addItems(themes)
+        self._select(self.theme_combo, st.get("theme"))
 
     def _select(self, combo, value):
         if value is None:
