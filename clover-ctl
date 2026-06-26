@@ -159,7 +159,8 @@ service)
 	need_root; need_efi
 	case "${1:-}" in
 		disable)
-			cp "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$EFI_PATH/Microsoft/Boot/bootmgfw.efi"
+			[ -f "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" ] || die "Windows EFI backup missing - refusing to disable Clover so Windows stays bootable"
+			cp "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" || die "could not restore Windows EFI - leaving Clover enabled"
 			win=$(efibootmgr | grep -i Windows | colrm 9 | colrm 1 4)
 			[ -n "$win" ] && efibootmgr -n "$win" &> /dev/null
 			systemctl disable --now clover-bootmanager
@@ -192,7 +193,16 @@ install-decky)
 		url=${DECKY_PLUGIN_URL:-https://github.com/Hooandee/Handheld-Clover-dualboot/releases/latest/download/clover-dualboot-decky.zip}
 		tmp=$(mktemp -d)
 		echo "No local build found - downloading the prebuilt plugin..."
-		if curl -fsSL "$url" -o "$tmp/p.zip" && python3 -c "import zipfile; zipfile.ZipFile('$tmp/p.zip').extractall('$tmp')"
+		if curl -fsSL "$url" -o "$tmp/p.zip" && python3 -c "
+import zipfile, os
+dest = os.path.realpath('$tmp')
+with zipfile.ZipFile('$tmp/p.zip') as z:
+    for m in z.namelist():
+        p = os.path.realpath(os.path.join(dest, m))
+        if p != dest and not p.startswith(dest + os.sep):
+            raise SystemExit('unsafe path in zip: ' + m)
+    z.extractall(dest)
+"
 		then
 			src=$(dirname "$(find "$tmp" -name plugin.json 2> /dev/null | head -n1)")
 		fi
