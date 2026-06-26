@@ -18,6 +18,12 @@ def _find_ctl():
     return "clover-ctl"
 
 
+def _lang_file():
+    dirs = glob.glob("/home/*/1Clover-tools")
+    base = dirs[0] if dirs else os.path.expanduser("~/1Clover-tools")
+    return os.path.join(base, "lang")
+
+
 class Plugin:
     async def _main(self):
         self.ctl = _find_ctl()
@@ -64,3 +70,34 @@ class Plugin:
     async def set_service(self, action):
         rc, out, err = self._run(["service", action])
         return {"ok": rc == 0, "message": out or err}
+
+    async def get_lang(self):
+        env = os.environ.get("CLOVER_LANG")
+        if env in ("es", "en"):
+            return env
+        try:
+            with open(_lang_file()) as f:
+                val = f.read().strip()
+            if val in ("es", "en"):
+                return val
+        except OSError:
+            pass
+        return "es"
+
+    async def set_lang(self, lang):
+        if lang not in ("es", "en"):
+            return {"ok": False}
+        path = _lang_file()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(lang + "\n")
+        except OSError:
+            return {"ok": False}
+        try:
+            # keep the file owned by the real user, not root, so the GUI can write it too
+            owner = os.stat(os.path.dirname(path))
+            os.chown(path, owner.st_uid, owner.st_gid)
+        except OSError:
+            pass
+        return {"ok": True}
