@@ -39,6 +39,7 @@ TIMEOUTS = ["1", "5", "10", "15", "60"]
 DEFAULT_OS = [("Windows", "windows"), ("SteamOS", "steamos"),
               ("Bazzite", "bazzite"), ("Last used", "lastos")]
 
+VERSION = "1.0.0"
 ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clover.png")
 
 QSS = """
@@ -141,6 +142,7 @@ class CloverWindow(QMainWindow):
             ("Themes", "preferences-desktop-theme", QStyle.StandardPixmap.SP_FileDialogContentsView, self._themes_page),
             ("Game Mode", "input-gaming", QStyle.StandardPixmap.SP_ComputerIcon, self._gamemode_page),
             ("Advanced", "applications-system", QStyle.StandardPixmap.SP_FileDialogDetailedView, self._advanced_page),
+            ("About", "help-about", QStyle.StandardPixmap.SP_DialogHelpButton, self._about_page),
         ]
         for title, icon_name, fallback, builder in pages:
             self.sidebar.addItem(QListWidgetItem(self._icon(icon_name, fallback), title))
@@ -252,6 +254,11 @@ class CloverWindow(QMainWindow):
         self.theme_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.theme_preview.setMinimumHeight(180)
         v.addWidget(self.theme_preview)
+        self.icon_row = QHBoxLayout()
+        self.icon_row.setSpacing(6)
+        icon_wrap = QWidget()
+        icon_wrap.setLayout(self.icon_row)
+        v.addWidget(icon_wrap)
         v.addWidget(QLabel("Themes live on the EFI partition. \"random\" rotates on each boot."))
         v.addSpacing(14)
         v.addWidget(QLabel("<b>Boot logo</b>"))
@@ -299,6 +306,22 @@ class CloverWindow(QMainWindow):
         v.addStretch(1)
         return page
 
+    def _about_page(self):
+        page, v = self._page("About")
+        about = QLabel(
+            "<div style='font-size:13pt;'><b>Clover Dual Boot</b></div>"
+            f"<p>Version {VERSION}</p>"
+            "<p>Maintained and extended by <b>Hooandee</b><br>"
+            "<a style='color:#5fd07a;' href='https://youtube.com/c/hooandee'>youtube.com/c/hooandee</a></p>"
+            "<p style='color:#9aa3ad;'>Built on the original SteamDeck-Clover-dualboot "
+            "scripts by ryanrudolf. Clover bootloader by the CloverHackyColor team.</p>")
+        about.setTextFormat(Qt.TextFormat.RichText)
+        about.setOpenExternalLinks(True)
+        about.setWordWrap(True)
+        v.addWidget(about)
+        v.addStretch(1)
+        return page
+
     def refresh(self):
         st = self.engine.status(self)
         if not st:
@@ -331,12 +354,37 @@ class CloverWindow(QMainWindow):
     def _update_theme_preview(self, name):
         if not name:
             return
-        path = self.engine.theme_preview(name, self)
-        pixmap = QPixmap(path) if path else QPixmap()
-        if not pixmap.isNull():
-            self.theme_preview.setPixmap(pixmap.scaledToWidth(380, Qt.TransformationMode.SmoothTransformation))
+        bg = None
+        icons = []
+        for line in self.engine.theme_preview(name, self).splitlines():
+            if "\t" not in line:
+                continue
+            kind, path = line.split("\t", 1)
+            if kind == "background":
+                bg = path
+            elif kind == "icon":
+                icons.append(path)
+        bgmap = QPixmap(bg) if bg else QPixmap()
+        if not bgmap.isNull():
+            self.theme_preview.setPixmap(bgmap.scaledToWidth(380, Qt.TransformationMode.SmoothTransformation))
         else:
             self.theme_preview.setText("No preview available for this theme.")
+        self._set_theme_icons(icons)
+
+    def _set_theme_icons(self, icons):
+        while self.icon_row.count():
+            item = self.icon_row.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        for path in icons[:10]:
+            pixmap = QPixmap(path)
+            if pixmap.isNull():
+                continue
+            label = QLabel()
+            label.setPixmap(pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            self.icon_row.addWidget(label)
+        self.icon_row.addStretch(1)
 
     def _select(self, combo, value):
         if value is None:

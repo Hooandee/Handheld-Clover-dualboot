@@ -8,6 +8,8 @@
 
 set -u
 
+CTL_VERSION="1.0.0"
+
 detect_os() {
 	if grep -qi bazzite /etc/os-release 2> /dev/null
 	then
@@ -122,6 +124,9 @@ list-themes)
 	;;
 detect-resolution)
 	detect_native_resolution
+	;;
+version)
+	echo "$CTL_VERSION"
 	;;
 set-resolution)
 	need_root
@@ -305,13 +310,25 @@ theme-preview)
 	case "$name" in */*) die "invalid theme name" ;; esac
 	dir="$EFI_PATH/clover/themes/$name"
 	[ -d "$dir" ] || die "theme not found: $name"
-	img=$(ls "$dir" 2> /dev/null | grep -iE '\.(png|jpg|jpeg)$' | grep -i background | head -n1)
-	[ -n "$img" ] || img=$(ls "$dir" 2> /dev/null | grep -iE 'screenshot.*\.(png|jpg|jpeg)$' | head -n1)
-	[ -n "$img" ] || img=$(ls "$dir" 2> /dev/null | grep -iE '\.(png|jpg|jpeg)$' | head -n1)
-	[ -n "$img" ] || die "no preview image in theme $name"
-	out="/tmp/clover-theme-preview.png"
-	cp "$dir/$img" "$out" && chmod 644 "$out"
-	echo "$out"
+	tmp="/tmp/clover-theme-preview"
+	rm -rf "$tmp"
+	mkdir -p "$tmp"
+	chmod 755 "$tmp"
+	# background image (printed as: background<TAB>path)
+	bg=$(ls "$dir" 2> /dev/null | grep -iE '\.(png|jpg|jpeg)$' | grep -i background | head -n1)
+	[ -n "$bg" ] || bg=$(ls "$dir" 2> /dev/null | grep -iE 'screenshot.*\.(png|jpg|jpeg)$' | head -n1)
+	[ -n "$bg" ] || bg=$(ls "$dir" 2> /dev/null | grep -iE '\.(png|jpg|jpeg)$' | head -n1)
+	if [ -n "$bg" ]
+	then
+		cp "$dir/$bg" "$tmp/" 2> /dev/null && chmod 644 "$tmp/$bg" && printf 'background\t%s\n' "$tmp/$bg"
+	fi
+	# theme icons (PNG only - Qt cannot render .icns); prefer an icons/ subfolder
+	icondir="$dir"
+	[ -d "$dir/icons" ] && icondir="$dir/icons"
+	ls "$icondir" 2> /dev/null | grep -iE '^(os_|func_|vol_|tool_|pointer|selection|radio_)' | grep -iE '\.png$' | head -n 12 | while read -r f
+	do
+		cp "$icondir/$f" "$tmp/$f" 2> /dev/null && chmod 644 "$tmp/$f" && printf 'icon\t%s\n' "$tmp/$f"
+	done
 	;;
 help|--help|-h)
 	cat <<'USAGE'
@@ -320,6 +337,7 @@ clover-ctl <command> [args]
   get <resolution|theme|timeout|default-os>         read one value
   list-themes                                       installed Clover themes
   detect-resolution                                 native panel resolution
+  version                                           print the tool version
   set-resolution <WxH|auto>                         (root)
   set-theme <name>                                  (root)
   set-timeout <seconds>                             (root)
