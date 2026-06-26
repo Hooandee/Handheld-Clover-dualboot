@@ -9,7 +9,13 @@ It expects `clover-ctl` to be present at `~/1Clover-tools/clover-ctl` (where the
 main installer places it). The backend also searches `/home/*/1Clover-tools/`
 and the plugin's own `bin/` as fallbacks.
 
-## Build (on a dev machine with Node + pnpm)
+## Easiest: one click from the desktop app
+Open the **Clover Dual Boot** desktop app and click **Install / update Decky
+plugin**. It drops a prebuilt copy (downloaded from the latest release, or a
+local build if you made one) into `~/homebrew/plugins/` and reloads Decky - no
+Node needed on the handheld.
+
+## Build it yourself (dev machine with Node + pnpm)
 
 ```bash
 cd decky

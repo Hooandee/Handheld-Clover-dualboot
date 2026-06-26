@@ -351,6 +351,7 @@ cp -R custom/logos ~/1Clover-tools &> /dev/null
 cp -R custom/efi ~/1Clover-tools &> /dev/null
 cp clover-ctl ~/1Clover-tools &> /dev/null
 cp -R gui ~/1Clover-tools &> /dev/null
+cp -R decky ~/1Clover-tools &> /dev/null
 
 # make the scripts executable
 chmod +x ~/1Clover-tools/Clover-Toolbox.sh ~/1Clover-tools/clover-ctl ~/1Clover-tools/gui/clover-desktop

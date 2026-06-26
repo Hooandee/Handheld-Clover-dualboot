@@ -136,6 +136,13 @@ class CloverWindow(QWidget):
         srow.addWidget(clover_btn)
         root.addWidget(service_box)
 
+        gm_box = QGroupBox("Game Mode (Decky)")
+        grow = QHBoxLayout(gm_box)
+        decky_btn = QPushButton("Install / update Decky plugin")
+        decky_btn.clicked.connect(self.install_decky)
+        grow.addWidget(decky_btn)
+        root.addWidget(gm_box)
+
         bottom = QHBoxLayout()
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(self.refresh)
@@ -221,6 +228,13 @@ class CloverWindow(QWidget):
 
     def enable_clover(self):
         self._apply(["service", "enable"], "Clover service re-enabled.")
+
+    def install_decky(self):
+        rc, out, err = self.engine.run(["install-decky"], self)
+        if rc == 0:
+            QMessageBox.information(self, "Clover", out or "Decky plugin installed.")
+        elif err != "cancelled":
+            QMessageBox.warning(self, "Clover", err or out or "Could not install the Decky plugin.")
 
 
 def main():

@@ -1,0 +1,46 @@
+name: build-decky-plugin
+
+# Builds the Decky plugin so end users never need Node. Pushes produce a
+# downloadable artifact; publishing a Release attaches a ready-to-install zip
+# that the desktop app's "Install Decky plugin" button downloads.
+
+on:
+  push:
+    paths:
+      - "decky/**"
+      - ".github/workflows/build-decky.yml"
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: decky
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm build
+      - name: Package plugin
+        run: |
+          mkdir -p "out/Clover Dual Boot/dist"
+          cp plugin.json main.py "out/Clover Dual Boot/"
+          cp dist/index.js "out/Clover Dual Boot/dist/"
+          cd out && zip -r ../clover-dualboot-decky.zip "Clover Dual Boot"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clover-dualboot-decky
+          path: decky/clover-dualboot-decky.zip
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: decky/clover-dualboot-decky.zip

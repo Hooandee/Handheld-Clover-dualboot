@@ -162,6 +162,38 @@ service)
 		*) die "usage: clover-ctl service <enable|disable>" ;;
 	esac
 	;;
+install-decky)
+	need_root
+	user=${SUDO_USER:-$(id -un 1000 2> /dev/null || echo deck)}
+	home=$(getent passwd "$user" | cut -d: -f6)
+	[ -n "$home" ] || home="/home/$user"
+	[ -d "$home/homebrew" ] || die "Decky Loader not found at $home/homebrew - install Decky first"
+	dest="$home/homebrew/plugins/Clover Dual Boot"
+	# use a local prebuilt plugin if present, otherwise download the prebuilt release
+	src=""
+	for d in "$home/1Clover-tools/decky" "$(dirname "$0")/decky" "$(dirname "$0")/../decky"
+	do
+		[ -f "$d/dist/index.js" ] && { src="$d"; break; }
+	done
+	tmp=""
+	if [ -z "$src" ]
+	then
+		url=${DECKY_PLUGIN_URL:-https://github.com/Hooandee/Handheld-Clover-dualboot/releases/latest/download/clover-dualboot-decky.zip}
+		tmp=$(mktemp -d)
+		echo "No local build found - downloading the prebuilt plugin..."
+		if curl -fsSL "$url" -o "$tmp/p.zip" && python3 -c "import zipfile; zipfile.ZipFile('$tmp/p.zip').extractall('$tmp')"
+		then
+			src=$(dirname "$(find "$tmp" -name plugin.json 2> /dev/null | head -n1)")
+		fi
+		{ [ -n "$src" ] && [ -f "$src/dist/index.js" ]; } || { rm -rf "$tmp"; die "no built plugin available - run 'cd decky && pnpm build', or check your connection"; }
+	fi
+	mkdir -p "$dest/dist"
+	cp "$src/plugin.json" "$src/main.py" "$dest/" && cp "$src/dist/index.js" "$dest/dist/" || { [ -n "$tmp" ] && rm -rf "$tmp"; die "failed to copy plugin into $dest"; }
+	chown -R "$user":"$user" "$dest" 2> /dev/null || true
+	[ -n "$tmp" ] && rm -rf "$tmp"
+	systemctl restart plugin_loader 2> /dev/null && echo "Decky restarted." || echo "Installed - reload Decky to see it."
+	echo "Decky plugin installed to: $dest"
+	;;
 help|--help|-h)
 	cat <<'USAGE'
 clover-ctl <command> [args]
@@ -174,6 +206,7 @@ clover-ctl <command> [args]
   set-timeout <seconds>                             (root)
   set-default-os <windows|steamos|bazzite|lastos>   (root)
   service <enable|disable>                          (root) enable Clover, or hand next boot to Windows
+  install-decky                                     (root) install/update the Decky (Game Mode) plugin
 USAGE
 	;;
 *)
