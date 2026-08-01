@@ -24,17 +24,20 @@ This project is based on the original work by ryanrudolf, [SteamDeck-Clover-dual
 | ASUS ROG Ally X | `RC72LA` | 1920x1080 |
 | ASUS ROG Xbox Ally | `RC73YA` | 1920x1080 |
 | ASUS ROG Xbox Ally X | `RC73XA` | 1920x1080 |
-| Lenovo Legion Go | `83E1` | 2560x1600 |
-| Lenovo Legion Go 2 | `83N0` / `83N1` | 1920x1200 |
-| Lenovo Legion Go S | `83L3` / `83Q2` / `83Q3` | 1920x1200 |
+| Lenovo Legion Go | `83E1…` | 2560x1600 |
+| Lenovo Legion Go 2 | `83N0…` / `83N1…` | 1920x1200 |
+| Lenovo Legion Go S | `83L3…` / `83Q2…` / `83Q3…` / `83N6…` | 1920x1200 |
+| MSI Claw 8 AI+ | `Claw 8 AI+…` | 1920x1200 |
 | OneXPlayer 2 Pro | `ONEXPLAYER 2 PRO ARP23P` | 2560x1600 |
 
-Got **another handheld**? It works in generic mode: the installer reads your panel's native resolution from the kernel and asks you to continue, so most x86 handhelds install without touching any code.
+The ellipsis means full SKU strings are also recognized, for example `83N6000MSB`. The installer prefers the native resolution reported by the kernel and uses the table resolution as a fallback.
 
-> ⚠️ **Not supported:** the Lenovo Legion Go S `83N6` is blocked because the XBOX 360 controller UEFI driver is not compatible with it.
+Got **another handheld**? It works in safe generic mode: the installer reads your panel's native resolution from the kernel and asks you to continue. It does not automatically install UEFI drivers without known compatibility.
+
+> **Legion Go S `83N6`:** Clover installs normally, but the XBOX 360 controller UEFI driver is disabled because it is incompatible with this variant. The menu remains usable with a keyboard or any input device exposed by the firmware.
 
 ### Using the controller inside the Clover menu
-On every handheld except the Steam Deck, the installer adds the XBOX 360 controller UEFI driver so the built-in gamepad works in the boot menu:
+On models with known compatibility, the installer adds the XBOX 360 controller UEFI driver so the built-in gamepad works in the boot menu. It is disabled on the Steam Deck and Legion Go S `83N6`; on unverified models the installer asks before adding it.
 * **D-pad**: move (arrow keys)
 * **A** = Enter, **B** = Esc
 * **Right trigger** = left click, **left trigger** = right click

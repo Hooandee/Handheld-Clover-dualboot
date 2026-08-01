@@ -5,7 +5,7 @@ title: "[Device] <vendor> <model>"
 labels: device-request
 ---
 
-Run `./report-device.sh` in SteamOS / Bazzite Desktop Mode and paste its output here:
+Run `./report-device.sh` in SteamOS / Bazzite Desktop Mode and paste its output here. The report includes the detected profile, screen resolution and safe controller policy, but never serial numbers or UUIDs:
 
 ```
 <paste the report-device.sh output>

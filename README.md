@@ -24,17 +24,20 @@ Este proyecto parte del trabajo original de ryanrudolf, [SteamDeck-Clover-dualbo
 | ASUS ROG Ally X | `RC72LA` | 1920x1080 |
 | ASUS ROG Xbox Ally | `RC73YA` | 1920x1080 |
 | ASUS ROG Xbox Ally X | `RC73XA` | 1920x1080 |
-| Lenovo Legion Go | `83E1` | 2560x1600 |
-| Lenovo Legion Go 2 | `83N0` / `83N1` | 1920x1200 |
-| Lenovo Legion Go S | `83L3` / `83Q2` / `83Q3` | 1920x1200 |
+| Lenovo Legion Go | `83E1…` | 2560x1600 |
+| Lenovo Legion Go 2 | `83N0…` / `83N1…` | 1920x1200 |
+| Lenovo Legion Go S | `83L3…` / `83Q2…` / `83Q3…` / `83N6…` | 1920x1200 |
+| MSI Claw 8 AI+ | `Claw 8 AI+…` | 1920x1200 |
 | OneXPlayer 2 Pro | `ONEXPLAYER 2 PRO ARP23P` | 2560x1600 |
 
-¿Tienes **otra portátil**? Funciona en modo genérico: el instalador lee la resolución nativa del panel desde el kernel y te pregunta si quieres continuar, así que la mayoría de portátiles x86 se instalan sin tocar nada de código.
+Los puntos suspensivos indican que también se reconocen los SKU completos, por ejemplo `83N6000MSB`. El instalador prefiere la resolución nativa publicada por el kernel y usa la resolución de la tabla como respaldo.
 
-> ⚠️ **No compatible:** la Lenovo Legion Go S `83N6` está bloqueada porque el controlador UEFI del mando XBOX 360 no es compatible con ella.
+¿Tienes **otra portátil**? Funciona en modo genérico seguro: el instalador lee la resolución nativa del panel desde el kernel y te pregunta si quieres continuar. No instala automáticamente controladores UEFI sin compatibilidad conocida.
+
+> **Legion Go S `83N6`:** Clover se instala con normalidad, pero el controlador UEFI del mando XBOX 360 queda desactivado porque es incompatible con esta variante. El menú puede manejarse con un teclado o con cualquier dispositivo de entrada que exponga el firmware.
 
 ### Usar el mando dentro del menú de Clover
-En todas las portátiles menos la Steam Deck, el instalador añade el controlador UEFI del mando XBOX 360 para que el mando integrado funcione en el menú de arranque:
+En los modelos con compatibilidad conocida, el instalador añade el controlador UEFI del mando XBOX 360 para que el mando integrado funcione en el menú de arranque. En la Steam Deck y la Legion Go S `83N6` se desactiva; en modelos todavía no verificados el instalador pregunta antes de añadirlo.
 * **Cruceta**: moverse (teclas de flecha)
 * **A** = Intro, **B** = Esc
 * **Gatillo derecho** = clic izquierdo, **gatillo izquierdo** = clic derecho

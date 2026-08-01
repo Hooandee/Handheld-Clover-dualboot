@@ -141,5 +141,34 @@ else
 	fail=1
 fi
 
+REPORT_FIXTURE=$(mktemp -d)
+mkdir -p "$REPORT_FIXTURE/sys/class/dmi/id" "$REPORT_FIXTURE/sys/class/drm/card0-eDP-1"
+printf '%s\n' LENOVO > "$REPORT_FIXTURE/sys/class/dmi/id/sys_vendor"
+printf '%s\n' 83N6000MSB > "$REPORT_FIXTURE/sys/class/dmi/id/product_name"
+printf '%s\n' "Legion Go S 8APU1" > "$REPORT_FIXTURE/sys/class/dmi/id/product_family"
+printf '%s\n' LNVNB161216 > "$REPORT_FIXTURE/sys/class/dmi/id/board_name"
+printf '%s\n' DO-NOT-LEAK > "$REPORT_FIXTURE/sys/class/dmi/id/product_serial"
+printf '%s\n' 1200x1920 > "$REPORT_FIXTURE/sys/class/drm/card0-eDP-1/modes"
+REPORT_OUTPUT=$(CLOVER_SYS_ROOT="$REPORT_FIXTURE" \
+	CLOVER_DRM_ROOT="$REPORT_FIXTURE/sys/class/drm" CLOVER_LANG=en \
+	bash "$DIR/report-device.sh")
+
+expect_report() { # description literal
+	case "$REPORT_OUTPUT" in
+		*"$2"*) printf 'ok   report %s\n' "$1" ;;
+		*) printf 'FAIL report %s (missing %s)\n' "$1" "$2"; fail=1 ;;
+	esac
+}
+
+expect_report "identifies the full Legion Go S SKU" "Detected profile: Legion Go S"
+expect_report "reports normalized native resolution" "Native resolution: 1920x1200"
+expect_report "reports the safe fallback" "Fallback resolution: 1920x1200"
+expect_report "reports the controller policy" "UEFI controller policy: none"
+case "$REPORT_OUTPUT" in
+	*DO-NOT-LEAK*) printf 'FAIL report leaked product_serial\n'; fail=1 ;;
+	*) printf 'ok   report excludes product_serial\n' ;;
+esac
+rm -rf "$REPORT_FIXTURE"
+
 echo "---"
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi
