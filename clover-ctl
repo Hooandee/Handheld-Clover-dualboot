@@ -64,17 +64,7 @@ release_lock() {
 
 acquire_lock() {
 	wanted_lock=$1
-	if ! mkdir "$wanted_lock" 2> /dev/null
-	then
-		lock_pid=$(cat "$wanted_lock/pid" 2> /dev/null)
-		if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2> /dev/null
-		then
-			die "another Clover operation is already running"
-		fi
-		rm -f "$wanted_lock/pid" 2> /dev/null
-		rmdir "$wanted_lock" 2> /dev/null && mkdir "$wanted_lock" 2> /dev/null \
-			|| die "could not acquire the Clover operation lock"
-	fi
+	mkdir "$wanted_lock" 2> /dev/null || die "another Clover operation is already running (remove stale lock only after confirming no Clover process is active: $wanted_lock)"
 	LOCK_DIR=$wanted_lock
 	printf '%s\n' "$$" > "$LOCK_DIR/pid" || { release_lock; die "could not record the Clover operation lock"; }
 	trap release_lock EXIT
@@ -84,6 +74,7 @@ acquire_lock() {
 verified_publish() {
 	source_file=$1
 	target_file=$2
+	[ -s "$source_file" ] || return 1
 	stage="$target_file.cloverctl.$$"
 	rm -f "$stage"
 	cp "$source_file" "$stage" && cmp -s "$source_file" "$stage" \
@@ -196,6 +187,7 @@ install_clover_loader() {
 		[ -s "$BOOTX64" ] || die "original BOOTX64 loader is missing"
 		verified_publish "$BOOTX64" "$backup" || die "could not create a verified BOOTX64 backup"
 	fi
+	[ -s "$backup" ] || die "verified BOOTX64 backup is empty or invalid: $backup"
 	verified_publish "$source_loader" "$BOOTX64" || {
 		verified_publish "$backup" "$BOOTX64" \
 			|| die "Clover loader publication and verified BOOTX64 rollback both failed; backup remains at $backup"
@@ -552,16 +544,21 @@ uninstall)
 	need_root; need_efi
 	home=$(getent passwd "${SUDO_USER:-$(id -un 1000 2> /dev/null)}" | cut -d: -f6)
 	[ -n "$home" ] || home="$HOME"
+	systemctl disable --now clover-bootmanager.service &> /dev/null || true
 	if [ -f "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" ]
 	then
+		acquire_lock "$EFI_PATH/Microsoft/.clover-efi.lock"
 		verified_publish "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" \
 			|| die "could not restore and verify the Windows EFI loader - uninstall aborted"
 		rm -f "$EFI_PATH/Microsoft/bootmgfw.efi"
+		release_lock
 	fi
 	if [ -f "$BOOTX64.orig" ]
 	then
+		acquire_lock "$EFI_PATH/.clover-efi.lock"
 		verified_publish "$BOOTX64.orig" "$BOOTX64" \
 			|| die "could not restore and verify the original BOOTX64 loader - uninstall aborted"
+		release_lock
 	fi
 	rm -rf "$EFI_PATH/clover"
 	rm -f "$EFI_PATH/steamos/steamos.png"
@@ -571,7 +568,6 @@ uninstall)
 	done
 	ro=$(command -v steamos-readonly)
 	[ -n "$ro" ] && steamos-readonly disable 2> /dev/null
-	systemctl disable --now clover-bootmanager.service &> /dev/null
 	rm -f /etc/systemd/system/clover-bootmanager*
 	rm -rf /etc/clover-dualboot
 	systemctl daemon-reload 2> /dev/null

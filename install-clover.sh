@@ -431,9 +431,16 @@ fi
 
 # re-arrange the boot order and make Clover the priority!
 CLOVER=$(efibootmgr | grep -i "Clover - GUI" | colrm 9 | colrm 1 4)
-[ -n "$CLOVER" ] || { msg clover_install_fail; exit 1; }
-echo -e "$current_password\n" | sudo -S efibootmgr -n $CLOVER &> /dev/null
-echo -e "$current_password\n" | sudo -S efibootmgr -o $CLOVER &> /dev/null
+set -- $CLOVER
+[ "$#" -eq 1 ] || { msg clover_install_fail; exit 1; }
+case "$1" in ???? ) ;; *) msg clover_install_fail; exit 1 ;; esac
+CLOVER=$1
+if ! echo -e "$current_password\n" | sudo -S efibootmgr -n "$CLOVER" &> /dev/null \
+	|| ! echo -e "$current_password\n" | sudo -S efibootmgr -o "$CLOVER" &> /dev/null
+then
+	msg clover_install_fail
+	exit 1
+fi
 
 # Final sanity check
 efibootmgr | grep "Clover - GUI" &> /dev/null

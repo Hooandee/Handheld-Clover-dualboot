@@ -167,6 +167,9 @@ CLOVER_BOOTX_PATH="$BOOT_DIR/bootx64.efi" bash "$CTL" install-clover-loader "$EF
 expect "verified Clover loader publication succeeds" "$?" "0"
 expect "original BOOTX64 backup is preserved" "$(cat "$BOOT_DIR/bootx64.efi.orig")" "original-loader"
 expect "Clover loader becomes canonical BOOTX64" "$(cat "$BOOT_DIR/bootx64.efi")" "clover-loader"
+: > "$BOOT_DIR/bootx64.efi.orig"
+CLOVER_BOOTX_PATH="$BOOT_DIR/bootx64.efi" bash "$CTL" install-clover-loader "$EFI/cloverx64.efi" > /dev/null 2>&1
+expect "empty BOOTX64 backup fails closed" "$?" "1"
 
 rm -rf "$EFI" "$FAKEBIN"
 rm -f "$TMP" "$TMP.cloverctl.tmp"

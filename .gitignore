@@ -1,7 +1,5 @@
-# --- Internal agent / local docs (never pushed) ---
-CLAUDE.md
-CLAUDE.local.md
-.claude/
+# --- Local-only project notes and tooling ---
+.local/
 
 # --- OS / editor cruft ---
 .DS_Store
@@ -9,8 +7,8 @@ CLAUDE.local.md
 *~
 
 # --- Build / runtime artifacts ---
-# (decky/ has its own .gitignore for node_modules + dist)
+node_modules/
 *.log
-~/temp-ESP
+temp-ESP/
 __pycache__/
 *.pyc
