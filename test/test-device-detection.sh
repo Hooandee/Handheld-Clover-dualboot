@@ -174,6 +174,38 @@ esac
 rm -rf "$REPORT_FIXTURE"
 
 DRIVER_MANAGER="$DIR/custom/manage-controller-driver.sh"
+CONTROLLER_CONFIG="$DIR/custom/xbox360-clover.ini"
+CONTROLLER_DRIVER="$DIR/custom/UsbXbox360Dxe.efi"
+if [ -f "$CONTROLLER_CONFIG" ] \
+	&& grep -qx 'ButtonDpadUp=KeyUp' "$CONTROLLER_CONFIG" \
+	&& grep -qx 'ButtonDpadDown=KeyDown' "$CONTROLLER_CONFIG" \
+	&& grep -qx 'ButtonDpadLeft=KeyLeft' "$CONTROLLER_CONFIG" \
+	&& grep -qx 'ButtonDpadRight=KeyRight' "$CONTROLLER_CONFIG" \
+	&& grep -qx 'ButtonA=KeyEnter' "$CONTROLLER_CONFIG" \
+	&& grep -qx 'ButtonB=KeyEscape' "$CONTROLLER_CONFIG"
+then
+	printf 'ok   Clover controller mappings use console navigation\n'
+else
+	printf 'FAIL Clover controller mappings do not provide console navigation\n'
+	fail=1
+fi
+CONTROLLER_DRIVER_HEX=$(od -An -tx1 -v "$CONTROLLER_DRIVER" | tr -d ' \n')
+case "$CONTROLLER_DRIVER_HEX" in
+	*2b6fb3d351d5d4119a460090273fc14d*)
+		printf 'ok   controller driver registers as a UEFI console input\n'
+		;;
+	*)
+		printf 'FAIL controller driver does not register as a UEFI console input\n'
+		fail=1
+		;;
+esac
+if ! strings "$CONTROLLER_DRIVER" | grep -q PointerUp
+then
+	printf 'ok   controller driver keeps D-pad navigation separate from the pointer\n'
+else
+	printf 'FAIL controller driver still contains the temporary pointer mapping\n'
+	fail=1
+fi
 if [ -f "$DRIVER_MANAGER" ]
 then
 	DRIVER_FIXTURE=$(mktemp -d)
@@ -189,13 +221,22 @@ then
 	fi
 
 	printf '%s\n' verified-driver > "$DRIVER_FIXTURE/source.efi"
+	printf '%s\n' console-navigation > "$DRIVER_FIXTURE/source.ini"
 	bash "$DRIVER_MANAGER" install "$DRIVER_FIXTURE/source.efi" \
-		"$DRIVER_FIXTURE/drivers" > /dev/null 2>&1
+		"$DRIVER_FIXTURE/drivers" "$DRIVER_FIXTURE/source.ini" \
+		"$DRIVER_FIXTURE/config" > /dev/null 2>&1
 	if cmp -s "$DRIVER_FIXTURE/source.efi" "$DRIVER_FIXTURE/drivers/UsbXbox360Dxe.efi"
 	then
 		printf 'ok   compatible policy installs the controller driver\n'
 	else
 		printf 'FAIL compatible policy did not install the controller driver\n'
+		fail=1
+	fi
+	if cmp -s "$DRIVER_FIXTURE/source.ini" "$DRIVER_FIXTURE/config/config.ini"
+	then
+		printf 'ok   compatible policy installs Clover console navigation\n'
+	else
+		printf 'FAIL compatible policy did not install Clover console navigation\n'
 		fail=1
 	fi
 	rm -rf "$DRIVER_FIXTURE"

@@ -36,10 +36,10 @@ Los puntos suspensivos indican que también se reconocen los SKU completos, por 
 
 ### Usar el mando dentro del menú de Clover
 En los modelos con compatibilidad conocida, incluida la Legion Go S `83N6`, el instalador añade el controlador UEFI del mando XBOX 360 para que el mando integrado funcione en el menú de arranque. En la Steam Deck se desactiva; en modelos todavía no verificados el instalador pregunta antes de añadirlo.
-* **Cruceta**: moverse (teclas de flecha)
-* **A** = Intro, **B** = Esc
+* **Cruceta**: cambiar la opción seleccionada
+* **A** = confirmar, **B** = volver
 * **Gatillo derecho** = clic izquierdo, **gatillo izquierdo** = clic derecho
-* Si la cruceta no responde, usa el joystick izquierdo para mover el puntero del ratón.
+* Los dos joysticks también mueven el puntero.
 
 La pantalla táctil solo funciona cuando el firmware del equipo expone un dispositivo de puntero a UEFI. En la Legion Go S `83N6` el panel táctil es I²C y no está disponible para Clover; usa el mando integrado, el touchpad o un teclado USB.
 
