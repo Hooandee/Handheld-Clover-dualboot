@@ -320,6 +320,7 @@ class CloverWindow(QMainWindow):
         super().__init__()
         self.engine = Engine()
         self._theme_limit = THEME_LIMIT
+        self._theme_count = 0
         self._installed_themes = []
         self.lang = load_lang()
         self.t = make_tr(self.lang)
@@ -584,6 +585,7 @@ class CloverWindow(QMainWindow):
             self.statusBar().showMessage(self.t("status_unreadable"))
             return
         self._theme_limit = st.get("theme_limit", THEME_LIMIT)
+        self._theme_count = st.get("theme_count", 0)
         for key, lbl in self.status_fields.items():
             lbl.setText(str(st.get(key, "—")))
         self._tint(self.status_fields.get("service"), st.get("service") == "enabled")
@@ -707,7 +709,7 @@ class CloverWindow(QMainWindow):
             label = QLabel(f"{name}  {self.t('tag_active')}" if is_active else name)
             h.addWidget(label, 1)
             btn = QPushButton(self.t("btn_remove"))
-            btn.setEnabled(not is_active)
+            btn.setEnabled(not is_active and name != "random")
             btn.clicked.connect(lambda _=False, n=name: self.remove_theme(n))
             h.addWidget(btn)
             self.installed_box.addWidget(row)
@@ -721,7 +723,8 @@ class CloverWindow(QMainWindow):
     def install_themes_dialog(self):
         limit = self._theme_limit
         installed = self._installed_themes
-        free = limit - len(installed)
+        count = self._theme_count
+        free = limit - count
         if free <= 0:
             QMessageBox.information(self, "Clover", self.t("install_full", max=limit))
             return
@@ -737,7 +740,7 @@ class CloverWindow(QMainWindow):
         dlg.setWindowTitle(self.t("dlg_install_title"))
         dlg.resize(360, 460)
         lay = QVBoxLayout(dlg)
-        lay.addWidget(QLabel(self.t("install_slots", n=len(installed), max=limit, free=free)))
+        lay.addWidget(QLabel(self.t("install_slots", n=count, max=limit, free=free)))
         lay.addWidget(QLabel(self.t("install_pick")))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

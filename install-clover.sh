@@ -79,10 +79,12 @@ msg() {
 		bootx64_orig_found) es='%s.orig encontrado - no se necesita acción.'; en='%s.orig found - no action needed.' ;;
 		bootx64_backup_missing) es='Copia de seguridad de %s no encontrada.'; en='%s backup not found.' ;;
 		bootx64_copy_done) es='Copia de Clover EFI a %s - hecho.'; en='Copy Clover EFI to %s - done.' ;;
+		bootx64_copy_failed) es='No se pudo instalar de forma segura el cargador de Clover en %s. Se ha restaurado el cargador original.'; en='Could not safely install the Clover loader at %s. The original loader was restored.' ;;
 		win_backup_exists) es='Existe copia de la EFI de Windows. Comprobando si hay que desactivar la EFI de Windows.'; en='Windows EFI backup exists. Check if Windows EFI needs to be disabled.' ;;
 		win_disabled_done) es='Había que desactivar la EFI de Windows - hecho.'; en='Windows EFI needs to be disabled - done.' ;;
 		win_already_disabled) es='La EFI de Windows ya está desactivada - no se necesita acción.'; en='Windows EFI is already disabled - no action needed.' ;;
 		win_backup_missing) es='No existe copia de la EFI de Windows.'; en='Windows EFI backup does not exist.' ;;
+		win_protect_failed) es='No se pudo proteger la EFI de Windows. La instalación se detiene sin mover su cargador.'; en='Could not protect the Windows EFI. Installation stopped without moving its loader.' ;;
 		clover_installed_ok) es='¡Clover se ha instalado correctamente en la partición EFI del sistema!'; en='Clover has been successfully installed to the EFI system partition!' ;;
 		clover_install_fail) es='Vaya, algo salió mal. Clover no está instalado.'; en='Whoopsie something went wrong. Clover is not installed.' ;;
 		final_config) es='Realizando la configuración final para %s.'; en='Making final configuration for %s.' ;;
@@ -90,6 +92,9 @@ msg() {
 		esp_label_done) es='Etiqueta de la partición ESP completada.'; en='ESP partition label has been completed.' ;;
 		desktop_icon_toolbox) es='¡Se ha creado el icono de escritorio para Clover Toolbox!'; en='Desktop icon for Clover Toolbox has been created!' ;;
 		desktop_app_installed) es='¡La app de escritorio de Clover ha sido instalada!'; en='Clover desktop app has been installed!' ;;
+		tools_install_failed) es='No se pudieron instalar todos los archivos de Clover Tools. La instalación se detiene.'; en='Could not install all Clover Tools files. Installation stopped.' ;;
+		service_install_failed) es='No se pudo instalar o iniciar el servicio de Clover. La instalación se detiene.'; en='Could not install or start the Clover service. Installation stopped.' ;;
+		desktop_app_failed) es='No se pudo instalar el lanzador de la app de escritorio.'; en='Could not install the desktop app launcher.' ;;
 		install_completed) es='¡Instalación de Clover completada en %s!'; en='Clover install completed on %s!' ;;
 		*) es="$k"; en="$k" ;;
 	esac
@@ -412,29 +417,31 @@ then
 	msg bootx64_orig_found "$BOOTX64"
 else
 	msg bootx64_backup_missing "$BOOTX64"
-	echo -e "$current_password\n" | sudo -S cp $BOOTX64 $BOOTX64.orig
-	echo -e "$current_password\n" | sudo -S cp $EFI_PATH/clover/cloverx64.efi $BOOTX64
-	msg bootx64_copy_done "$BOOTX64"
+	if ! echo -e "$current_password\n" | sudo -S cp "$BOOTX64" "$BOOTX64.orig" \
+		|| ! echo -e "$current_password\n" | sudo -S cmp -s "$BOOTX64" "$BOOTX64.orig"
+	then
+		msg bootx64_copy_failed "$BOOTX64"
+		exit 1
+	fi
 fi
 
-# check if Windows EFI needs to be disabled!
-echo -e "$current_password\n" | sudo -S test -e $EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig
-if [ $? -eq 0 ]
+if echo -e "$current_password\n" | sudo -S cp "$EFI_PATH/clover/cloverx64.efi" "$BOOTX64" \
+	&& echo -e "$current_password\n" | sudo -S cmp -s "$EFI_PATH/clover/cloverx64.efi" "$BOOTX64"
 then
-	msg win_backup_exists
-	echo -e "$current_password\n" | sudo -S test -e $EFI_PATH/Microsoft/Boot/bootmgfw.efi
-	if [ $? -eq 0 ]
-	then
-		echo -e "$current_password\n" | sudo -S mv $EFI_PATH/Microsoft/Boot/bootmgfw.efi $EFI_PATH/Microsoft/bootmgfw.efi &> /dev/null
-		msg win_disabled_done
-	else
-		msg win_already_disabled
-	fi
+	msg bootx64_copy_done "$BOOTX64"
 else
-	msg win_backup_missing
-	echo -e "$current_password\n" | sudo -S cp $EFI_PATH/Microsoft/Boot/bootmgfw.efi $EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig &> /dev/null
-	echo -e "$current_password\n" | sudo -S mv $EFI_PATH/Microsoft/Boot/bootmgfw.efi $EFI_PATH/Microsoft/bootmgfw.efi &> /dev/null
+	echo -e "$current_password\n" | sudo -S cp "$BOOTX64.orig" "$BOOTX64" &> /dev/null
+	msg bootx64_copy_failed "$BOOTX64"
+	exit 1
+fi
+
+# verify/refresh the Windows backup before disabling its canonical loader
+if echo -e "$current_password\n" | sudo -S env CLOVER_EFI_PATH="$EFI_PATH" ./clover-ctl protect-windows-efi
+then
 	msg win_disabled_done
+else
+	msg win_protect_failed
+	exit 1
 fi
 
 # re-arrange the boot order and make Clover the priority!
@@ -452,27 +459,35 @@ else
 fi
 
 # create ~/1Clover-tools and place the scripts in there
-mkdir ~/1Clover-tools &> /dev/null
+mkdir -p ~/1Clover-tools || { msg tools_install_failed; exit 1; }
 rm -f ~/1Clover-tools/* &> /dev/null
-cp custom/Clover-Toolbox.sh ~/1Clover-tools &> /dev/null
-echo -e "$current_password\n" | sudo -S cp custom/clover-bootmanager.service custom/clover-bootmanager.sh /etc/systemd/system
-cp -R custom/logos ~/1Clover-tools &> /dev/null
-cp -R custom/efi ~/1Clover-tools &> /dev/null
-cp clover-ctl ~/1Clover-tools &> /dev/null
-cp -R gui ~/1Clover-tools &> /dev/null
-cp -R decky ~/1Clover-tools &> /dev/null
-
-mkdir -p ~/1Clover-tools
-printf '%s\n' "$CLOVER_LANG" > ~/1Clover-tools/lang
+if ! cp custom/Clover-Toolbox.sh clover-ctl ~/1Clover-tools \
+	|| ! cp -R custom/logos custom/efi gui decky ~/1Clover-tools \
+	|| ! printf '%s\n' "$CLOVER_LANG" > ~/1Clover-tools/lang
+then
+	msg tools_install_failed
+	exit 1
+fi
+if ! echo -e "$current_password\n" | sudo -S cp custom/clover-bootmanager.service custom/clover-bootmanager.sh /etc/systemd/system
+then
+	msg service_install_failed
+	exit 1
+fi
 
 # make the scripts executable
-chmod +x ~/1Clover-tools/Clover-Toolbox.sh ~/1Clover-tools/clover-ctl ~/1Clover-tools/gui/clover-desktop
-echo -e "$current_password\n" | sudo -S chmod +x /etc/systemd/system/clover-bootmanager.sh
+chmod +x ~/1Clover-tools/Clover-Toolbox.sh ~/1Clover-tools/clover-ctl ~/1Clover-tools/gui/clover-desktop \
+	|| { msg tools_install_failed; exit 1; }
+echo -e "$current_password\n" | sudo -S chmod +x /etc/systemd/system/clover-bootmanager.sh \
+	|| { msg service_install_failed; exit 1; }
 
 # start the clover-bootmanager.service
-echo -e "$current_password\n" | sudo -S systemctl daemon-reload
-echo -e "$current_password\n" | sudo -S systemctl enable --now clover-bootmanager.service
-echo -e "$current_password\n" | sudo -S /etc/systemd/system/clover-bootmanager.sh
+if ! echo -e "$current_password\n" | sudo -S systemctl daemon-reload \
+	|| ! echo -e "$current_password\n" | sudo -S systemctl enable --now clover-bootmanager.service \
+	|| ! echo -e "$current_password\n" | sudo -S /etc/systemd/system/clover-bootmanager.sh
+then
+	msg service_install_failed
+	exit 1
+fi
 
 # custom config if using SteamOS or Bazzite
 if [ $OS = SteamOS ]
@@ -503,10 +518,14 @@ msg desktop_icon_toolbox
 
 # install the Clover desktop app launcher (apps menu + desktop shortcut)
 mkdir -p ~/.local/share/applications
-sed -e "s|^Exec=.*|Exec=$HOME/1Clover-tools/gui/clover-desktop|" -e "s|^Icon=.*|Icon=$HOME/1Clover-tools/gui/clover.png|" ~/1Clover-tools/gui/clover-dualboot.desktop > ~/.local/share/applications/clover-dualboot.desktop
-chmod +x ~/.local/share/applications/clover-dualboot.desktop
-cp ~/.local/share/applications/clover-dualboot.desktop ~/Desktop/ &> /dev/null
-chmod +x ~/Desktop/clover-dualboot.desktop &> /dev/null
+if ! sed -e "s|^Exec=.*|Exec=$HOME/1Clover-tools/gui/clover-desktop|" -e "s|^Icon=.*|Icon=$HOME/1Clover-tools/gui/clover.png|" ~/1Clover-tools/gui/clover-dualboot.desktop > ~/.local/share/applications/clover-dualboot.desktop \
+	|| ! chmod +x ~/.local/share/applications/clover-dualboot.desktop \
+	|| ! cp ~/.local/share/applications/clover-dualboot.desktop ~/Desktop/ \
+	|| ! chmod +x ~/Desktop/clover-dualboot.desktop
+then
+	msg desktop_app_failed
+	exit 1
+fi
 msg desktop_app_installed
 
 msg install_completed "$OS"

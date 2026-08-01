@@ -12,8 +12,9 @@ engine (`clover-ctl`):
 2. Let the user **install Clover themes from the
    [CloverThemes](https://github.com/CloverHackyColor/CloverThemes) repo** directly from
    the Themes page — pick one or more, download and install them — and **manage/remove**
-   installed themes. The ESP is tiny, so a hard cap of **5 themes total** applies; at the
-   cap the user must remove a theme before installing another.
+installed themes. The ESP is tiny, so a hard cap of **5 real themes** applies; the
+built-in `random` selector is metadata that rotates among them and does not consume a
+slot. At the cap the user must remove a theme before installing another.
 
 Out of scope: the Decky (React) frontend — it stays disabled. React best-practices do not
 apply; this is Python/PySide6 + bash.
@@ -33,23 +34,27 @@ GUI (PySide6) ──sudo──> clover-ctl install-theme <name> ──curl/pytho
 
 ## Engine: new `clover-ctl` subcommands
 
-A constant `THEME_LIMIT=5`. The cap counts **all** theme folders in `clover/themes`
-(including the factory-bundled Apocalypse/Catalina/Eclipse/Mojave).
+A constant `THEME_LIMIT=5`. The cap counts the real theme folders in `clover/themes`
+(including the factory-bundled Apocalypse/Catalina/Eclipse/Mojave) but excludes the
+special `random` selector.
 
 - **`list-remote-themes`** (no root): GET the CloverThemes contents API, print theme folder
   names (one per line), skipping dotfolders. Read-only, no EFI needed.
 - **`install-theme <name>`** (root + efi):
-  - Sanitize: reject names containing `/` or `..`.
-  - Refuse if already installed.
-  - Enforce the cap: count dirs in `clover/themes`; if `>= THEME_LIMIT`, `die` with a clear
+  - Sanitize to a safe, printable filename component and reject `.` / `..` / separators.
+  - Refuse if already installed, using a case-insensitive match for VFAT.
+  - Enforce the cap: count real theme dirs in `clover/themes` (excluding `random`); if
+    `>= THEME_LIMIT`, `die` with a clear
     message telling the user to remove a theme first.
+  - Serialize installs with a lock so concurrent commands cannot exceed the cap.
   - Resolve the default branch, walk the git tree filtered to `<name>/`, download each file
     via `raw.githubusercontent.com` into a temp dir.
   - **Free-space check**: refuse (and clean up) if the downloaded theme would not fit in the
     ESP's free space.
   - Move the temp dir into `clover/themes/<name>`. Clean the temp dir on any failure.
 - **`remove-theme <name>`** (root + efi): sanitize; **refuse to remove the currently-active
-  theme**; remove `clover/themes/<name>`.
+  theme (case-insensitive) or the built-in `random` selector**; remove
+  `clover/themes/<name>` and report deletion errors.
 
 Help text is updated. A gated `CLOVER_EFI_PATH` env override is added (mirrors the existing
 `CLOVER_CONFIG`) so the cap/remove logic is testable offline.
@@ -78,6 +83,8 @@ Same page, no separate dialog for management:
 Offline-testable via `CLOVER_EFI_PATH` + `CLOVER_CONFIG`:
 
 - `install-theme` rejects names containing `/`.
+- The built-in `random` selector does not consume a slot and cannot be removed.
+- Missing, case-variant active, invalid and concurrent theme operations fail closed.
 - The 5-theme cap is enforced (pre-create 5 dirs, expect refusal).
 - `remove-theme` refuses to remove the active theme.
 
