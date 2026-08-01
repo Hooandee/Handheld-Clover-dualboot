@@ -31,9 +31,7 @@ msg() {
 		banner_title) es='Script de instalación de Clover Dual Boot para SteamOS y Bazzite'; en='Clover Dual Boot Install Script for SteamOS and Bazzite' ;;
 		banner_author) es='Creado por ryanrudolf, ampliado por Hooandee'; en='Created by ryanrudolf, extended by Hooandee' ;;
 		sanity_checks) es='Realizando comprobaciones preliminares ...'; en='Doing preliminary sanity checks ...' ;;
-		registry_missing) es='Error: no se encontró custom/device-registry.sh - ejecuta este script desde el directorio del repositorio.'; en='Error: custom/device-registry.sh not found - run this script from the repo directory.' ;;
-		blocked_model) es='Ejecutándose en un modelo no compatible - %s.'; en='Script is running on unsupported model - %s.' ;;
-		blocked_exit) es='¡Dispositivo no compatible! Saliendo inmediatamente.'; en='Unsupported device! Exiting immediately.' ;;
+		registry_missing) es='Error: faltan los archivos de detección de dispositivos - ejecuta este script desde el directorio del repositorio.'; en='Error: device detection files are missing - run this script from the repo directory.' ;;
 		supported_model) es='Ejecutándose en un modelo compatible - %s.'; en='Script is running on supported model - %s.' ;;
 		no_edits_needed) es='No se necesitan más cambios en config.plist.'; en='No further edits needed to the config.plist.' ;;
 		creating_config) es='Creando configuración específica para %s.'; en='Creating config specific for %s.' ;;
@@ -41,9 +39,13 @@ msg() {
 		generic_possible) es='Clover aún puede instalarse en modo genérico para handhelds.'; en='Clover can still be installed in generic handheld mode.' ;;
 		generic_warn) es='Continúa solo si esto es un handheld / mini PC x86 que quieres en dual boot.'; en='Only continue if this is an x86 handheld / mini PC that you want to dual boot.' ;;
 		autodetected_res) es='Resolución nativa detectada automáticamente: %s'; en='Auto-detected native screen resolution: %s' ;;
+		registry_res) es='Usando la resolución conocida para este modelo: %s'; en='Using the known resolution for this model: %s' ;;
 		could_not_detect) es='No se pudo detectar la resolución - se usará el valor por defecto de Clover 1280x800.'; en='Could not auto-detect the resolution - the Clover default 1280x800 will be used.' ;;
 		change_later_toolbox) es='Puedes cambiarla luego desde el Clover Toolbox.'; en='You can change it later from the Clover Toolbox.' ;;
 		generic_prompt) es='¿Continuar en modo genérico para handhelds? (s/N): '; en='Proceed in generic handheld mode? (y/N): ' ;;
+		controller_disabled) es='El driver UEFI del mando XBOX 360 queda desactivado para evitar incompatibilidades en este modelo.'; en='The XBOX 360 controller UEFI driver is disabled to avoid compatibility issues on this model.' ;;
+		controller_optional) es='No hay compatibilidad verificada del mando integrado dentro de Clover para este modelo.'; en='Built-in controller compatibility inside Clover is not verified for this model.' ;;
+		controller_prompt) es='¿Probar el driver UEFI del mando XBOX 360? (s/N): '; en='Try the XBOX 360 controller UEFI driver? (y/N): ' ;;
 		aborting) es='Cancelando a petición del usuario.'; en='Aborting at user request.' ;;
 		creating_generic) es='Creando configuración para handheld genérico usando %s.'; en='Creating config for generic handheld using %s.' ;;
 		running_on_os) es='Ejecutándose en un SO compatible - %s.'; en='Script is running on supported OS - %s.' ;;
@@ -74,8 +76,7 @@ msg() {
 		installing_xpad) es='Instalando el driver UEFI del mando XBOX 360 para que el gamepad integrado funcione en Clover.'; en='Installing XBOX 360 controller UEFI driver so the built-in gamepad works in Clover.' ;;
 		xpad_ok) es='Driver UEFI de XBOX 360 instalado correctamente.'; en='Successfully installed XBOX 360 UEFI driver.' ;;
 		xpad_err) es='Error al instalar el driver UEFI de XBOX 360.'; en='Error installing XBOX 360 UEFI driver.' ;;
-		on_steamdeck) es='Ejecutándose en una Steam Deck.'; en='Script is running on a Steam Deck.' ;;
-		xpad_not_needed) es='No se necesita el driver UEFI de XBOX 360.'; en='XBOX 360 UEFI driver not needed.' ;;
+		xpad_not_needed) es='El driver UEFI de XBOX 360 no se instalará.'; en='The XBOX 360 UEFI driver will not be installed.' ;;
 		bootx64_orig_found) es='%s.orig encontrado - no se necesita acción.'; en='%s.orig found - no action needed.' ;;
 		bootx64_backup_missing) es='Copia de seguridad de %s no encontrada.'; en='%s backup not found.' ;;
 		bootx64_copy_done) es='Copia de Clover EFI a %s - hecho.'; en='Copy Clover EFI to %s - done.' ;;
@@ -116,77 +117,36 @@ CLOVER_URL=https://github.com/CloverHackyColor/CloverBootloader/releases/downloa
 CLOVER_ARCHIVE=$(curl -s -O -L -w "%{filename_effective}" $CLOVER_URL)
 CLOVER_BASE=$(basename -s .7z $CLOVER_ARCHIVE)
 CLOVER_EFI=\\EFI\\clover\\cloverx64.efi
-BOARD_NAME=$(cat /sys/class/dmi/id/board_name)
-PRODUCT_NAME=$(cat /sys/class/dmi/id/product_name)
-
-# every supported handheld except the Steam Deck needs the XBOX 360 controller
-# UEFI driver so its built-in gamepad works inside the Clover boot menu
-XPAD_DRIVER=yes
+BOARD_NAME=$(cat /sys/class/dmi/id/board_name 2> /dev/null)
+PRODUCT_NAME=$(cat /sys/class/dmi/id/product_name 2> /dev/null)
+PRODUCT_FAMILY=$(cat /sys/class/dmi/id/product_family 2> /dev/null)
+SYS_VENDOR=$(cat /sys/class/dmi/id/sys_vendor 2> /dev/null)
 
 # helper - write a screen resolution (eg 1920x1080) into the Clover config.plist
 set_resolution() {
 	sed -i '/<key>ScreenResolution<\/key>/!b;n;c\\t\t<string>'"$1"'<\/string>' custom/config.plist
 }
 
-# helper - detect the internal panel native resolution from the kernel (works
-# without a display server). Handheld panels are frequently mounted rotated, so
-# the result is normalized to landscape (width >= height) which is what Clover wants.
-detect_native_resolution() {
-	local modes res w h
-	for modes in /sys/class/drm/*eDP*/modes /sys/class/drm/*DSI*/modes /sys/class/drm/*LVDS*/modes
-	do
-		[ -f "$modes" ] || continue
-		res=$(head -n1 "$modes" 2> /dev/null)
-		case "$res" in
-			*x*) ;;
-			*) continue ;;
-		esac
-		w=${res%%x*}
-		h=${res##*x}
-		case "$w$h" in
-			*[!0-9]*) continue ;;
-		esac
-		if [ "$h" -gt "$w" ]
-		then
-			echo "${h}x${w}"
-		else
-			echo "${w}x${h}"
-		fi
-		return 0
-	done
-	return 1
-}
-
-# load the device registry and match this device by its DMI strings
-if [ ! -f custom/device-registry.sh ]
+# load the capability registry and shared panel detection
+if [ ! -f custom/device-registry.sh ] || [ ! -f custom/device-detection.sh ]
 then
 	msg registry_missing
-	exit
+	exit 1
 fi
 . custom/device-registry.sh
-DEVICE_MATCH=$(lookup_device "$BOARD_NAME" "$PRODUCT_NAME")
+. custom/device-detection.sh
+DEVICE_MATCH=$(lookup_device "$BOARD_NAME" "$PRODUCT_NAME" "$PRODUCT_FAMILY" "$SYS_VENDOR")
+INSTALL_PROFILE=$(resolve_install_profile "$BOARD_NAME" "$PRODUCT_NAME" "$PRODUCT_FAMILY" "$SYS_VENDOR")
+CONTROLLER_POLICY=${INSTALL_PROFILE##*|}
+INSTALL_PROFILE=${INSTALL_PROFILE%|*}
+RESOLUTION_SOURCE=${INSTALL_PROFILE##*|}
+INSTALL_PROFILE=${INSTALL_PROFILE%|*}
+SCREEN_RESOLUTION=${INSTALL_PROFILE##*|}
+DEVICE_NAME=${INSTALL_PROFILE%|*}
 
 if [ -n "$DEVICE_MATCH" ]
 then
-	DEVICE_NAME=${DEVICE_MATCH%|*}
-	DEVICE_ACTION=${DEVICE_MATCH##*|}
-	case "$DEVICE_ACTION" in
-		blocked)
-			msg blocked_model "$DEVICE_NAME"
-			msg blocked_exit
-			exit
-			;;
-		nodriver)
-			msg supported_model "$DEVICE_NAME"
-			msg no_edits_needed
-			XPAD_DRIVER=no
-			;;
-		*)
-			msg supported_model "$DEVICE_NAME"
-			msg creating_config "$DEVICE_NAME"
-			set_resolution "$DEVICE_ACTION"
-			;;
-	esac
+	msg supported_model "$DEVICE_NAME"
 
 # unknown device - fall back to generic handheld mode (experimental)
 else
@@ -194,17 +154,11 @@ else
 	msg not_in_list
 	echo "    board_name   : $BOARD_NAME"
 	echo "    product_name : $PRODUCT_NAME"
+	echo "    product_family: $PRODUCT_FAMILY"
+	echo "    sys_vendor   : $SYS_VENDOR"
 	echo ----------------------------------------------------------------------
 	msg generic_possible
 	msg generic_warn
-	AUTO_RES=$(detect_native_resolution)
-	if [ -n "$AUTO_RES" ]
-	then
-		msg autodetected_res "$AUTO_RES"
-	else
-		msg could_not_detect
-		msg change_later_toolbox
-	fi
 	if [ "${CLOVER_NONINTERACTIVE:-}" = 1 ]
 	then
 		GENERIC_CONFIRM=y
@@ -215,12 +169,41 @@ else
 		y|Y|s|S) ;;
 		*) msg aborting; exit ;;
 	esac
-	if [ -n "$AUTO_RES" ]
-	then
-		msg creating_generic "$AUTO_RES"
-		set_resolution "$AUTO_RES"
-	fi
 fi
+
+if [ -n "$SCREEN_RESOLUTION" ]
+then
+	if [ "$RESOLUTION_SOURCE" = drm ]
+	then
+		msg autodetected_res "$SCREEN_RESOLUTION"
+	else
+		msg registry_res "$SCREEN_RESOLUTION"
+	fi
+	if [ -n "$DEVICE_MATCH" ]
+	then
+		msg creating_config "$DEVICE_NAME"
+	else
+		msg creating_generic "$SCREEN_RESOLUTION"
+	fi
+	set_resolution "$SCREEN_RESOLUTION"
+else
+	msg could_not_detect
+	msg change_later_toolbox
+fi
+
+CONTROLLER_ANSWER=""
+if [ "$CONTROLLER_POLICY" = ask ]
+then
+	msg controller_optional
+	if [ "${CLOVER_NONINTERACTIVE:-}" != 1 ]
+	then
+		read -p "$(msg controller_prompt)" CONTROLLER_ANSWER
+	fi
+elif [ "$CONTROLLER_POLICY" = none ]
+then
+	msg controller_disabled
+fi
+XPAD_DRIVER=$(controller_driver_enabled "$CONTROLLER_POLICY" "${CLOVER_NONINTERACTIVE:-0}" "$CONTROLLER_ANSWER")
 
 # check if Bazzite or SteamOS
 grep -i bazzite /etc/os-release &> /dev/null
@@ -392,7 +375,6 @@ then
 		exit
 	fi
 else
-	msg on_steamdeck
 	msg xpad_not_needed
 fi
 

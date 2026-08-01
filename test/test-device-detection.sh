@@ -49,5 +49,97 @@ check "" "ONEXPLAYER 2 PRO ARP23P" "" ONE-NETBOOK \
 	"OneXPlayer 2 Pro|2560x1600|xpad"
 check WeirdBoard WeirdProduct "" Unknown ""
 
+DETECTION_HELPER="$DIR/custom/device-detection.sh"
+if [ -f "$DETECTION_HELPER" ]
+then
+	. "$DETECTION_HELPER"
+else
+	printf 'FAIL shared device-detection helper is missing\n'
+	fail=1
+fi
+
+if command -v detect_native_resolution > /dev/null 2>&1
+then
+	DRM_FIXTURE=$(mktemp -d)
+	expect_resolution() { # raw expected
+		rm -rf "$DRM_FIXTURE/card0-eDP-1"
+		mkdir -p "$DRM_FIXTURE/card0-eDP-1"
+		printf '%s\n' "$1" > "$DRM_FIXTURE/card0-eDP-1/modes"
+		got=$(CLOVER_DRM_ROOT="$DRM_FIXTURE" detect_native_resolution)
+		if [ "$got" = "$2" ]
+		then
+			printf 'ok   panel mode %-12s -> %s\n' "'$1'" "${got:-<none>}"
+		else
+			printf 'FAIL panel mode %-12s -> %s (expected %s)\n' \
+				"'$1'" "${got:-<none>}" "${2:-<none>}"
+			fail=1
+		fi
+	}
+
+	expect_resolution 1920x1200 1920x1200
+	expect_resolution 1200x1920 1920x1200
+	expect_resolution garbage ""
+	expect_resolution "" ""
+	rm -rf "$DRM_FIXTURE"
+fi
+
+if command -v controller_driver_enabled > /dev/null 2>&1
+then
+	expect_driver() { # policy noninteractive answer expected
+		got=$(controller_driver_enabled "$1" "$2" "$3")
+		if [ "$got" = "$4" ]
+		then
+			printf 'ok   controller policy=%-4s noninteractive=%s answer=%-3s -> %s\n' \
+				"$1" "$2" "${3:-<none>}" "$got"
+		else
+			printf 'FAIL controller policy=%s noninteractive=%s answer=%s -> %s (expected %s)\n' \
+				"$1" "$2" "${3:-<none>}" "$got" "$4"
+			fail=1
+		fi
+	}
+
+	expect_driver xpad 1 "" yes
+	expect_driver none 0 y no
+	expect_driver ask 1 y no
+	expect_driver ask 0 y yes
+	expect_driver ask 0 n no
+	expect_driver "" 1 y no
+fi
+
+if command -v resolve_install_profile > /dev/null 2>&1
+then
+	expect_profile() { # board product family vendor expected
+		got=$(CLOVER_DRM_ROOT="$DRM_FIXTURE" resolve_install_profile "$1" "$2" "$3" "$4")
+		if [ "$got" = "$5" ]
+		then
+			printf 'ok   install profile product=%-20s -> %s\n' "'$2'" "$got"
+		else
+			printf 'FAIL install profile product=%s -> %s (expected %s)\n' \
+				"'$2'" "$got" "$5"
+			fail=1
+		fi
+	}
+
+	rm -rf "$DRM_FIXTURE"
+	mkdir -p "$DRM_FIXTURE"
+	expect_profile "" 83N6000MSB "" Lenovo \
+		"Legion Go S|1920x1200|registry|none"
+	expect_profile RC72LA "" "" ASUSTeK \
+		"ROG Ally X|1920x1080|registry|xpad"
+	expect_profile "" "Claw 8 AI+ A2VM" "" MSI \
+		"MSI Claw 8 AI+|1920x1200|registry|ask"
+	expect_profile WeirdBoard WeirdProduct "" Unknown \
+		"Generic handheld||none|ask"
+
+	mkdir -p "$DRM_FIXTURE/card0-eDP-1"
+	printf '%s\n' 1200x1920 > "$DRM_FIXTURE/card0-eDP-1/modes"
+	expect_profile WeirdBoard WeirdProduct "" Unknown \
+		"Generic handheld|1920x1200|drm|ask"
+	rm -rf "$DRM_FIXTURE"
+else
+	printf 'FAIL resolve_install_profile is missing\n'
+	fail=1
+fi
+
 echo "---"
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi
