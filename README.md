@@ -12,7 +12,7 @@ Este proyecto parte del trabajo original de ryanrudolf, [SteamDeck-Clover-dualbo
 * **Instalador de temas**, integrado en la app: descarga temas desde CloverThemes, protege el tema activo y controla el espacio de la partición EFI.
 * **Clover Toolbox**, conservado como interfaz clásica de compatibilidad.
 * **Servicio de arranque** que revisa el dual boot en cada inicio y repara solo las entradas si se rompen.
-* **Controlador UEFI del mando XBOX 360** por [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) y [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe), activado únicamente en los modelos con compatibilidad conocida.
+* **Controlador UEFI del mando XBOX 360** por [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe), [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe) y [jlobue10](https://github.com/jlobue10/UsbXbox360Dxe), activado únicamente en los modelos con compatibilidad conocida.
 * **Tema Eclipse** de [chris1111](https://github.com/chris1111/).
 
 ## Dispositivos compatibles
@@ -34,16 +34,16 @@ Los puntos suspensivos indican que también se reconocen los SKU completos, por 
 
 ¿Tienes **otra portátil**? Funciona en modo genérico seguro: el instalador lee la resolución nativa del panel desde el kernel y te pregunta si quieres continuar. No instala automáticamente controladores UEFI sin compatibilidad conocida.
 
-> **Legion Go S `83N6`:** Clover se instala con normalidad, pero el controlador UEFI del mando XBOX 360 queda desactivado porque es incompatible con esta variante. El menú puede manejarse con un teclado o con cualquier dispositivo de entrada que exponga el firmware.
-
 ### Usar el mando dentro del menú de Clover
-En los modelos con compatibilidad conocida, el instalador añade el controlador UEFI del mando XBOX 360 para que el mando integrado funcione en el menú de arranque. En la Steam Deck y la Legion Go S `83N6` se desactiva; en modelos todavía no verificados el instalador pregunta antes de añadirlo.
+En los modelos con compatibilidad conocida, incluida la Legion Go S `83N6`, el instalador añade el controlador UEFI del mando XBOX 360 para que el mando integrado funcione en el menú de arranque. En la Steam Deck se desactiva; en modelos todavía no verificados el instalador pregunta antes de añadirlo.
 * **Cruceta**: moverse (teclas de flecha)
 * **A** = Intro, **B** = Esc
 * **Gatillo derecho** = clic izquierdo, **gatillo izquierdo** = clic derecho
 * Si la cruceta no responde, usa el joystick izquierdo para mover el puntero del ratón.
 
-Si Clover se queda colgado en una Legion Go (el controlador a veces se queda sondeando el mando), borra el controlador y reinicia:
+La pantalla táctil solo funciona cuando el firmware del equipo expone un dispositivo de puntero a UEFI. En la Legion Go S `83N6` el panel táctil es I²C y no está disponible para Clover; usa el mando integrado, el touchpad o un teclado USB.
+
+Si un firmware concreto presenta problemas con el controlador, puedes desactivarlo y reiniciar:
 ```bash
 sudo rm /esp/efi/clover/drivers/uefi/UsbXbox360Dxe.efi
 ```
