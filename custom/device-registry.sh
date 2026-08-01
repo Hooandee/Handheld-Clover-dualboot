@@ -1,16 +1,5 @@
 #!/bin/bash
 
-# Device capabilities used by the Clover installer.
-# Columns are pipe-separated:
-#
-#   match_field | match_mode | match_value | friendly_name | fallback_resolution | controller_policy | required_vendor
-#
-# match_field       : board, product, family or vendor
-# match_mode        : exact, prefix or contains
-# controller_policy : xpad installs UsbXbox360Dxe.efi
-#                     none never installs it on this hardware
-#                     ask lets an interactive user opt in, defaulting to none
-
 DEVICE_REGISTRY="\
 board|exact|Jupiter|Steam Deck|1280x800|none|VALVE
 board|exact|Galileo|Steam Deck OLED|1280x800|none|VALVE
@@ -60,7 +49,6 @@ registry_matches() {
 	esac
 }
 
-# Echoes "friendly_name|fallback_resolution|controller_policy" on a hit.
 lookup_device() {
 	local board="$1" product="$2" family="${3:-}" vendor="${4:-}"
 	local field mode value name resolution controller required_vendor

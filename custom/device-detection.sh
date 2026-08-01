@@ -28,14 +28,11 @@ controller_driver_enabled() {
 	local policy=$1 noninteractive=${2:-0} answer=${3:-}
 	case "$policy" in
 		xpad) printf '%s\n' yes ;;
-		none) printf '%s\n' no ;;
 		ask|"")
-			if [ "$noninteractive" = 1 ]
-			then
-				printf '%s\n' no
-			else
-				case "$answer" in y|Y|s|S) printf '%s\n' yes ;; *) printf '%s\n' no ;; esac
-			fi
+			case "$noninteractive:$answer" in
+				0:y|0:Y|0:s|0:S) printf '%s\n' yes ;;
+				*) printf '%s\n' no ;;
+			esac
 			;;
 		*) printf '%s\n' no ;;
 	esac

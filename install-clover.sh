@@ -128,7 +128,6 @@ set_resolution() {
 	sed -i '/<key>ScreenResolution<\/key>/!b;n;c\\t\t<string>'"$1"'<\/string>' custom/config.plist
 }
 
-# load the capability registry and shared panel detection
 if [ ! -f custom/device-registry.sh ] || [ ! -f custom/device-detection.sh ]
 then
 	msg registry_missing
@@ -362,7 +361,6 @@ echo -e "$current_password\n" | sudo -S cp custom/config.plist $EFI_PATH/clover/
 echo -e "$current_password\n" | sudo -S cp -Rf custom/themes/* $EFI_PATH/clover/themes
 echo -e "$current_password\n" | sudo -S rm -rf $EFI_PATH/clover/themes/{bgm,cesium,christmas,glass,purple_swirl,theme-sample.plist}
 
-# Reconcile the controller driver with the verified policy for this device.
 if [ "$XPAD_DRIVER" = "yes" ]
 then
 	msg installing_xpad

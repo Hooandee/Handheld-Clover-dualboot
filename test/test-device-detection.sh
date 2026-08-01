@@ -8,7 +8,7 @@ DIR=$(cd "$(dirname "$0")/.." && pwd)
 . "$DIR/custom/device-registry.sh"
 
 fail=0
-check() { # board product family vendor expected
+check() {
 	got=$(lookup_device "$1" "$2" "$3" "$4")
 	if [ "$got" = "$5" ]
 	then
@@ -64,7 +64,7 @@ fi
 if command -v detect_native_resolution > /dev/null 2>&1
 then
 	DRM_FIXTURE=$(mktemp -d)
-	expect_resolution() { # raw expected
+	expect_resolution() {
 		rm -rf "$DRM_FIXTURE/card0-eDP-1"
 		mkdir -p "$DRM_FIXTURE/card0-eDP-1"
 		printf '%s\n' "$1" > "$DRM_FIXTURE/card0-eDP-1/modes"
@@ -88,7 +88,7 @@ fi
 
 if command -v controller_driver_enabled > /dev/null 2>&1
 then
-	expect_driver() { # policy noninteractive answer expected
+	expect_driver() {
 		got=$(controller_driver_enabled "$1" "$2" "$3")
 		if [ "$got" = "$4" ]
 		then
@@ -111,7 +111,7 @@ fi
 
 if command -v resolve_install_profile > /dev/null 2>&1
 then
-	expect_profile() { # board product family vendor expected
+	expect_profile() {
 		got=$(CLOVER_DRM_ROOT="$DRM_FIXTURE" resolve_install_profile "$1" "$2" "$3" "$4")
 		if [ "$got" = "$5" ]
 		then
@@ -156,7 +156,7 @@ REPORT_OUTPUT=$(CLOVER_SYS_ROOT="$REPORT_FIXTURE" \
 	CLOVER_DRM_ROOT="$REPORT_FIXTURE/sys/class/drm" CLOVER_LANG=en \
 	bash "$DIR/report-device.sh")
 
-expect_report() { # description literal
+expect_report() {
 	case "$REPORT_OUTPUT" in
 		*"$2"*) printf 'ok   report %s\n' "$1" ;;
 		*) printf 'FAIL report %s (missing %s)\n' "$1" "$2"; fail=1 ;;
