@@ -2,15 +2,15 @@
 
 > 🇪🇸 ¿Prefieres español? La guía en español está aquí: [README.md](README.md)
 
-> 🚧 **Heads up:** a big update to the project is on the way. Some things will change soon, so bear with me if something doesn't quite line up yet.
-
 Install [Clover](https://github.com/CloverHackyColor/CloverBootloader), a graphical boot manager, to dual boot SteamOS (or Bazzite) and Windows (and other OSes too) on the Steam Deck and other x86 handhelds. The installer detects your device, makes as few changes to your system as possible, and adds a boot menu that repairs itself when a BIOS, OS or Windows update breaks the boot entries.
 
 This project is based on the original work by ryanrudolf, [SteamDeck-Clover-dualboot](https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot). Here I have extended it to support more handhelds and to make installation simpler.
 
 ## What's included
 * **Clover**, the graphical boot manager that does the heavy lifting.
-* **Clover Toolbox**, a simple GUI to configure Clover (themes, resolution, uninstall and more).
+* **Clover desktop app**, a bilingual graphical control panel for the default OS, resolution, timeout, boot logo, themes, diagnostics and uninstall.
+* **Theme installer**, built into the app: downloads from CloverThemes, protects the active theme and checks EFI partition space.
+* **Clover Toolbox**, retained as the classic compatibility interface.
 * **Boot-manager service** that checks the dual boot on every startup and auto-repairs broken boot entries.
 * **XBOX 360 controller UEFI driver** by [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) and [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe), so the built-in gamepad of non-Steam-Deck handhelds works inside the Clover menu.
 * **Eclipse theme** by [chris1111](https://github.com/chris1111/).
@@ -69,7 +69,7 @@ Go into Desktop Mode, open a terminal (Konsole), and paste this single line:
 cd ~ && rm -rf Handheld-Clover-dualboot && git clone https://github.com/Hooandee/Handheld-Clover-dualboot && cd Handheld-Clover-dualboot && chmod +x install-clover.sh && ./install-clover.sh
 ```
 
-It removes any old copy, clones the repo, and runs the installer. The script checks your sudo password and runs sanity checks along the way. When it finishes, **reboot** and you'll get the Clover menu to pick your OS (D-pad and **A** to confirm).
+It removes any old copy, clones the repo, and runs the installer. The script checks your sudo password and runs sanity checks along the way. When it finishes, the **Clover Dual Boot** app is available in the applications menu and on the desktop. **Reboot** and you'll get the Clover menu to pick your OS (D-pad and **A** to confirm).
 
 <details>
 <summary><b>Optional: Windows on microSD or external SSD</b></summary>
@@ -83,7 +83,7 @@ If Windows still keeps hijacking the boot, set up the scheduled task on the Wind
 </details>
 
 ### Updating to a newer version
-Open Clover Toolbox, hit **Uninstall**, clone the repo again, and repeat the install.
+Open the Clover Dual Boot app, go to **Advanced**, select **Uninstall**, clone the repo again, and repeat the install.
 
 ## Known issues
 **External display above 1080p (1440p, 4K).** Clover's screen may come out rotated, and Windows may fail to boot or show a blue screen. If you can, use a 1080p-or-lower display. Workaround: Clover Toolbox, **Resolution**, **DeckSight** option (note: this rotates Clover's screen on the Deck's built-in panel when no external display is connected).

@@ -1,0 +1,14 @@
+# --- Local-only project notes and tooling ---
+.local/
+
+# --- OS / editor cruft ---
+.DS_Store
+*.swp
+*~
+
+# --- Build / runtime artifacts ---
+node_modules/
+*.log
+temp-ESP/
+__pycache__/
+*.pyc

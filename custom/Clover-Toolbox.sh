@@ -19,6 +19,33 @@ else
 	fi
 fi
 
+# native panel resolution from the kernel, normalized to landscape (panels are often mounted rotated)
+detect_native_resolution() {
+	local modes res w h
+	for modes in /sys/class/drm/*eDP*/modes /sys/class/drm/*DSI*/modes /sys/class/drm/*LVDS*/modes
+	do
+		[ -f "$modes" ] || continue
+		res=$(head -n1 "$modes" 2> /dev/null)
+		case "$res" in
+			*x*) ;;
+			*) continue ;;
+		esac
+		w=${res%%x*}
+		h=${res##*x}
+		case "$w$h" in
+			*[!0-9]*) continue ;;
+		esac
+		if [ "$h" -gt "$w" ]
+		then
+			echo "${h}x${w}"
+		else
+			echo "${w}x${h}"
+		fi
+		return 0
+	done
+	return 1
+}
+
 current_password=$(zenity --password --title "sudo Password Authentication")
 echo -e "$current_password\n" | sudo -S ls &> /dev/null
 if [ $? -ne 0 ]
@@ -214,6 +241,7 @@ elif [ "$Choice" == "Resolution" ]
 then
 Resolution_Choice=$(zenity --width 550 --height 250 --list --radiolist --multiple --title "Clover Toolbox"\
 	--column "Select One" --column "Option" --column="Description - Read this carefully!"\
+	FALSE Auto "Auto-detect this device's native resolution (recommended)."\
 	FALSE STOCK "Use the default screen resolution 1280x800."\
 	FALSE DeckHD "Use DeckHD screen resolution 1920x1200."\
 	FALSE DeckSight "Use DeckSight screen resolution 1920x1080."\
@@ -222,6 +250,17 @@ Resolution_Choice=$(zenity --width 550 --height 250 --list --radiolist --multipl
 	if [ $? -eq 1 ] || [ "$Resolution_Choice" == "EXIT" ]
 	then
 		echo User pressed CANCEL. Going back to main menu.
+
+	elif [ "$Resolution_Choice" == "Auto" ]
+	then
+		Auto_Res=$(detect_native_resolution)
+		if [ -n "$Auto_Res" ]
+		then
+			echo -e "$current_password\n" | sudo -S sed -i '/<key>ScreenResolution<\/key>/!b;n;c\\t\t<string>'"$Auto_Res"'<\/string>' $EFI_PATH/clover/config.plist
+			zenity --warning --title "Clover Toolbox" --text "Screen resolution auto-detected and set to $Auto_Res." --width 400 --height 75
+		else
+			zenity --warning --title "Clover Toolbox" --text "Could not auto-detect the native resolution. Pick one of the presets instead." --width 400 --height 75
+		fi
 
 	elif [ "$Resolution_Choice" == "STOCK" ]
 	then

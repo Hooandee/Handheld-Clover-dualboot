@@ -2,15 +2,15 @@
 
 > 🇬🇧 Prefer English? Follow the English guide here: [README.en.md](README.en.md)
 
-> 🚧 **Aviso:** hay una actualización gorda del proyecto en camino. Algunas cosas van a cambiar pronto, así que ten un poco de paciencia si algo no termina de cuadrar.
-
 Instala [Clover](https://github.com/CloverHackyColor/CloverBootloader), un gestor de arranque gráfico, para tener SteamOS (o Bazzite) y Windows en el mismo equipo (y de paso otros sistemas) en la Steam Deck y en otras portátiles x86. El instalador detecta tu dispositivo, toca lo mínimo del sistema y añade un menú de arranque que se repara solo cuando una actualización de la BIOS, del sistema o de Windows te rompe las entradas de arranque.
 
 Este proyecto parte del trabajo original de ryanrudolf, [SteamDeck-Clover-dualboot](https://github.com/ryanrudolfoba/SteamDeck-Clover-dualboot). Aquí lo he ampliado para que funcione en más portátiles y para que instalarlo sea más sencillo.
 
 ## Qué incluye
 * **Clover**, el gestor de arranque gráfico que hace el trabajo de verdad.
-* **Clover Toolbox**, una interfaz sencilla para configurar Clover (temas, resolución, desinstalar y más cosas).
+* **App de escritorio Clover**, un panel gráfico bilingüe para cambiar el sistema por defecto, resolución, tiempo de espera, logo y temas, además de generar diagnósticos o desinstalar.
+* **Instalador de temas**, integrado en la app: descarga temas desde CloverThemes, protege el tema activo y controla el espacio de la partición EFI.
+* **Clover Toolbox**, conservado como interfaz clásica de compatibilidad.
 * **Servicio de arranque** que revisa el dual boot en cada inicio y repara solo las entradas si se rompen.
 * **Controlador UEFI del mando XBOX 360** por [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) y [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe), para que el mando integrado de las portátiles que no son Steam Deck funcione dentro del menú de Clover.
 * **Tema Eclipse** de [chris1111](https://github.com/chris1111/).
@@ -69,7 +69,7 @@ Entra en el Modo Escritorio, abre una terminal (Konsole) y pega este comando de 
 cd ~ && rm -rf Handheld-Clover-dualboot && git clone https://github.com/Hooandee/Handheld-Clover-dualboot && cd Handheld-Clover-dualboot && chmod +x install-clover.sh && ./install-clover.sh
 ```
 
-Borra cualquier copia anterior, clona el repositorio y lanza el instalador. El script comprueba tu contraseña de sudo y va haciendo verificaciones por el camino. Cuando termine, **reinicia** y verás el menú de Clover para elegir sistema (cruceta y **A** para confirmar).
+Borra cualquier copia anterior, clona el repositorio y lanza el instalador. El script comprueba tu contraseña de sudo y va haciendo verificaciones por el camino. Cuando termine tendrás la app **Clover Dual Boot** en el menú de aplicaciones y en el escritorio. **Reinicia** y verás el menú de Clover para elegir sistema (cruceta y **A** para confirmar).
 
 <details>
 <summary><b>Opcional: Windows en microSD o SSD externo</b></summary>
@@ -83,7 +83,7 @@ Si aun así Windows sigue secuestrando el arranque, configura la tarea programad
 </details>
 
 ### Actualizar a una versión nueva
-Abre Clover Toolbox, pulsa **Desinstalar**, vuelve a clonar el repositorio y repite la instalación.
+Abre la app Clover Dual Boot, entra en **Avanzado**, pulsa **Desinstalar**, vuelve a clonar el repositorio y repite la instalación.
 
 ## Problemas conocidos
 **Pantalla externa por encima de 1080p (1440p, 4K).** La pantalla de Clover puede salir girada y Windows puede no arrancar o darte un pantallazo azul. Si puedes, usa una pantalla de 1080p o menos. Como apaño: Clover Toolbox, **Resolución**, opción **DeckSight** (ojo: esto gira la pantalla de Clover en el panel interno de la Deck cuando no hay pantalla externa conectada).

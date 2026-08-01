@@ -1,0 +1,639 @@
+#!/bin/bash
+#
+# clover-ctl - non-interactive engine for the Clover dual-boot tools.
+# The desktop app and the Decky plugin both call this; it does the real work
+# so the logic lives in one place. Mutating commands need root (the frontends
+# elevate via pkexec or Decky's root backend). Set CLOVER_CONFIG to point the
+# read / config-write commands at a specific config.plist (used by the tests).
+
+set -u
+
+CTL_VERSION="1.1.0"
+
+# the ESP is tiny (~25MB free), so cap how many theme folders may live on it
+THEME_LIMIT=5
+CLOVERTHEMES_REPO=${CLOVERTHEMES_REPO:-CloverHackyColor/CloverThemes}
+
+detect_os() {
+	if grep -qi bazzite /etc/os-release 2> /dev/null
+	then
+		OS=bazzite; EFI_PATH=/boot/efi/EFI; BOOTX64=$EFI_PATH/BOOT/BOOTX64.EFI
+	elif grep -qi steamos /etc/os-release 2> /dev/null
+	then
+		OS=SteamOS; EFI_PATH=/esp/efi; BOOTX64=$EFI_PATH/boot/bootx64.efi
+	else
+		OS=unknown; EFI_PATH=; BOOTX64=
+	fi
+}
+detect_os
+# CLOVER_EFI_PATH lets the tests point the theme commands at a throwaway tree
+EFI_PATH=${CLOVER_EFI_PATH:-$EFI_PATH}
+BOOTX64=${CLOVER_BOOTX_PATH:-$BOOTX64}
+CONFIG=${CLOVER_CONFIG:-${EFI_PATH:+$EFI_PATH/clover/config.plist}}
+
+die() { echo "clover-ctl: $1" >&2; exit 1; }
+need_efi() { [ -n "$EFI_PATH" ] || die "not running on SteamOS or Bazzite"; }
+valid_theme_name() {
+	case "$1" in ''|.|..|*/*) die "invalid theme name: $1" ;; esac
+	printf '%s\n' "$1" | LC_ALL=C grep -Eq '^[[:alnum:] _.-]+$' \
+		|| die "invalid theme name: $1"
+}
+theme_count() {
+	[ -n "$EFI_PATH" ] || { echo 0; return; }
+	find "$EFI_PATH/clover/themes" -mindepth 1 -maxdepth 1 -type d ! -name random 2> /dev/null \
+		| awk 'END { print NR + 0 }'
+}
+installed_theme_name() {
+	[ -n "$EFI_PATH" ] || return 1
+	find "$EFI_PATH/clover/themes" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2> /dev/null \
+		| awk -v wanted="$1" 'tolower($0) == tolower(wanted) { print; exit }'
+}
+
+# root is required for the real install paths; the test suite opts out explicitly
+need_root() {
+	[ "${CLOVER_CTL_ALLOW_NONROOT:-}" = 1 ] && return 0
+	[ "$(id -u)" = 0 ] || die "must run as root (try: sudo clover-ctl $CMD ...)"
+}
+
+release_lock() {
+	[ -n "${LOCK_DIR:-}" ] || return 0
+	rm -f "$LOCK_DIR/pid" 2> /dev/null
+	rmdir "$LOCK_DIR" 2> /dev/null || true
+	LOCK_DIR=""
+}
+
+acquire_lock() {
+	wanted_lock=$1
+	mkdir "$wanted_lock" 2> /dev/null || die "another Clover operation is already running (remove stale lock only after confirming no Clover process is active: $wanted_lock)"
+	LOCK_DIR=$wanted_lock
+	printf '%s\n' "$$" > "$LOCK_DIR/pid" || { release_lock; die "could not record the Clover operation lock"; }
+	trap release_lock EXIT
+	trap 'exit 1' HUP INT TERM
+}
+
+verified_publish() {
+	source_file=$1
+	target_file=$2
+	[ -s "$source_file" ] || return 1
+	stage="$target_file.cloverctl.$$"
+	rm -f "$stage"
+	cp "$source_file" "$stage" && cmp -s "$source_file" "$stage" \
+		&& mv -f "$stage" "$target_file" && cmp -s "$source_file" "$target_file" \
+		&& return 0
+	rm -f "$stage"
+	return 1
+}
+
+# value of a <key> in a plist - the text on the following line, tags stripped
+plist_get() {
+	awk -v k="<key>$1</key>" '
+		f { sub(/^[[:space:]]*<[^>]*>/, ""); sub(/<\/[^>]*>[[:space:]]*$/, ""); print; exit }
+		index($0, k) { f = 1 }
+	' "$2" 2> /dev/null
+}
+
+# rewrite the value line after a <key>; portable (BSD/GNU) and backslash-safe via ENVIRON
+plist_set() {
+	[ -f "$4" ] || return 1
+	PLIST_VAL=$3 awk -v k="<key>$1</key>" -v tag="$2" '
+		repl { print "\t\t<" tag ">" ENVIRON["PLIST_VAL"] "</" tag ">"; repl = 0; done = 1; next }
+		{ print }
+		index($0, k) { repl = 1 }
+		END { if (!done) exit 2 }
+	' "$4" > "$4.cloverctl.tmp" || { rm -f "$4.cloverctl.tmp"; return 1; }
+	mv "$4.cloverctl.tmp" "$4"
+}
+
+plist_set_pair() {
+	file=$7
+	[ -f "$file" ] || return 1
+	work=$(mktemp "$file.cloverctl.XXXXXX") || return 1
+	cp "$file" "$work" \
+		&& plist_set "$1" "$2" "$3" "$work" \
+		&& plist_set "$4" "$5" "$6" "$work" \
+		&& mv "$work" "$file" \
+		&& return 0
+	rm -f "$work" "$work.cloverctl.tmp"
+	return 1
+}
+
+refresh_windows_backup() {
+	source_loader=$1
+	backup=$2
+	previous=$3
+	new_backup="$backup.new"
+	new_previous="$previous.new"
+	rm -f "$new_backup" "$new_previous"
+	[ -s "$source_loader" ] || return 1
+	cp "$source_loader" "$new_backup" && cmp -s "$source_loader" "$new_backup" \
+		|| { rm -f "$new_backup"; return 1; }
+	if [ -e "$backup" ]
+	then
+		[ -s "$backup" ] \
+			&& cp "$backup" "$new_previous" \
+			&& cmp -s "$backup" "$new_previous" \
+			&& mv -f "$new_previous" "$previous" \
+			|| { rm -f "$new_backup" "$new_previous"; return 1; }
+	fi
+	mv -f "$new_backup" "$backup"
+}
+
+protect_windows_efi() {
+	need_root; need_efi
+	win_boot="$EFI_PATH/Microsoft/Boot"
+	active="$win_boot/bootmgfw.efi"
+	backup="$active.orig"
+	previous="$active.orig.prev"
+	disabled="$EFI_PATH/Microsoft/bootmgfw.efi"
+	[ -d "$win_boot" ] || die "Windows EFI directory not found: $win_boot"
+	acquire_lock "$EFI_PATH/Microsoft/.clover-efi.lock"
+	if [ -e "$active" ]
+	then
+		refresh_windows_backup "$active" "$backup" "$previous" \
+			|| die "could not create a verified Windows EFI backup - leaving Windows enabled"
+		mv -f "$active" "$disabled" \
+			|| die "could not disable the Windows EFI loader - leaving Windows enabled"
+		if ! cmp -s "$backup" "$disabled"
+		then
+			verified_publish "$backup" "$active" \
+				|| die "Windows EFI verification and verified rollback both failed; the backup remains at $backup"
+			die "Windows EFI verification failed; the canonical loader was restored from the verified backup"
+		fi
+		release_lock
+		echo "Windows EFI loader protected and disabled"
+		return 0
+	fi
+	[ -s "$backup" ] && [ -s "$disabled" ] \
+		|| die "Windows EFI loader or verified backup missing - refusing to continue"
+	if ! cmp -s "$backup" "$disabled"
+	then
+		refresh_windows_backup "$disabled" "$backup" "$previous" \
+			|| die "could not refresh the Windows EFI backup"
+	fi
+	release_lock
+	echo "Windows EFI loader already disabled with a verified backup"
+}
+
+install_clover_loader() {
+	need_root; need_efi
+	source_loader=$1
+	[ -s "$source_loader" ] || die "Clover loader not found: $source_loader"
+	[ -n "$BOOTX64" ] || die "canonical BOOTX64 path is unknown"
+	mkdir -p "$(dirname "$BOOTX64")" || die "could not create the BOOTX64 directory"
+	acquire_lock "$EFI_PATH/.clover-efi.lock"
+	backup="$BOOTX64.orig"
+	if [ ! -e "$backup" ]
+	then
+		[ -s "$BOOTX64" ] || die "original BOOTX64 loader is missing"
+		verified_publish "$BOOTX64" "$backup" || die "could not create a verified BOOTX64 backup"
+	fi
+	[ -s "$backup" ] || die "verified BOOTX64 backup is empty or invalid: $backup"
+	verified_publish "$source_loader" "$BOOTX64" || {
+		verified_publish "$backup" "$BOOTX64" \
+			|| die "Clover loader publication and verified BOOTX64 rollback both failed; backup remains at $backup"
+		die "could not publish the Clover loader; original BOOTX64 was restored"
+	}
+	release_lock
+	echo "Clover loader installed at $BOOTX64"
+}
+
+# native panel resolution from the kernel, normalized to landscape (panels are often mounted rotated)
+detect_native_resolution() {
+	local modes res w h
+	for modes in /sys/class/drm/*eDP*/modes /sys/class/drm/*DSI*/modes /sys/class/drm/*LVDS*/modes
+	do
+		[ -f "$modes" ] || continue
+		res=$(head -n1 "$modes" 2> /dev/null)
+		case "$res" in *x*) ;; *) continue ;; esac
+		w=${res%%x*}; h=${res##*x}
+		case "$w$h" in *[!0-9]*) continue ;; esac
+		[ "$h" -gt "$w" ] && echo "${h}x${w}" || echo "${w}x${h}"
+		return 0
+	done
+	return 1
+}
+
+# map a DefaultLoader path + DefaultVolume to a friendly OS name (loader paths in
+# config.plist are mixed/upper case, so lowercase before matching)
+default_os_label() {
+	local loader; loader=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
+	case "$2" in *LastBootedVolume*) echo lastos; return ;; esac
+	case "$loader" in
+		*microsoft*) echo windows ;;
+		*steamcl*) echo steamos ;;
+		*fedora*|*shimx64*) echo bazzite ;;
+		*) echo unknown ;;
+	esac
+}
+
+# read every status field in a single pass: resolution|theme|timeout|loader|volume
+plist_get_all() {
+	awk '
+		function val(s) { sub(/^[[:space:]]*<[^>]*>/, "", s); sub(/<\/[^>]*>[[:space:]]*$/, "", s); return s }
+		/<key>ScreenResolution<\/key>/ { getline; r = val($0) }
+		/<key>Theme<\/key>/            { getline; t = val($0) }
+		/<key>Timeout<\/key>/          { getline; o = val($0) }
+		/<key>DefaultLoader<\/key>/    { getline; l = val($0) }
+		/<key>DefaultVolume<\/key>/    { getline; v = val($0) }
+		END { print r "|" t "|" o "|" l "|" v }
+	' "$1" 2> /dev/null
+}
+
+json_bool() { [ "$1" = yes ] && echo true || echo false; }
+
+CMD=${1:-help}
+shift 2> /dev/null || true
+
+case "$CMD" in
+status)
+	if [ -n "$CONFIG" ] && [ -f "$CONFIG" ]; then installed=yes; else installed=no; fi
+	if systemctl is-enabled clover-bootmanager &> /dev/null; then service=enabled
+	elif systemctl list-unit-files clover-bootmanager.service &> /dev/null; then service=disabled
+	else service=absent; fi
+	if [ -n "$EFI_PATH" ] && [ -e "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" ]; then winactive=yes; else winactive=no; fi
+	IFS='|' read -r res theme timeout loader volume < <(plist_get_all "$CONFIG")
+	printf '{"os":"%s","installed":%s,"resolution":"%s","theme":"%s","timeout":"%s","default_os":"%s","service":"%s","windows_active":%s,"theme_limit":%d,"theme_count":%d}\n' \
+		"$OS" "$(json_bool $installed)" "$res" "$theme" "$timeout" \
+		"$(default_os_label "$loader" "$volume")" "$service" "$(json_bool $winactive)" "$THEME_LIMIT" "$(theme_count)"
+	;;
+get)
+	case "${1:-}" in
+		resolution) plist_get ScreenResolution "$CONFIG" ;;
+		theme) plist_get Theme "$CONFIG" ;;
+		timeout) plist_get Timeout "$CONFIG" ;;
+		default-os) default_os_label "$(plist_get DefaultLoader "$CONFIG")" "$(plist_get DefaultVolume "$CONFIG")" ;;
+		*) die "usage: clover-ctl get <resolution|theme|timeout|default-os>" ;;
+	esac
+	;;
+list-themes)
+	need_efi
+	ls "$EFI_PATH/clover/themes" 2> /dev/null
+	;;
+list-remote-themes)
+	# top-level folders of the CloverThemes repo = installable themes
+	api="https://api.github.com/repos/$CLOVERTHEMES_REPO/contents"
+	curl -fsSL --connect-timeout 10 --max-time 30 -H "Accept: application/vnd.github+json" "$api" 2> /dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+for e in data:
+    if e.get("type") == "dir" and not e.get("name", "").startswith("."):
+        print(e["name"])
+' || die "could not fetch the theme list - check your connection"
+	;;
+install-theme)
+	need_root; need_efi
+	name=${1:-}
+	[ -n "$name" ] || die "usage: clover-ctl install-theme <name>"
+	valid_theme_name "$name"
+	themes="$EFI_PATH/clover/themes"
+	installed=$(installed_theme_name "$name")
+	[ -n "$installed" ] && die "theme already installed: $installed"
+	acquire_lock "$EFI_PATH/clover/.theme-operation.lock"
+	tmp=""
+	cleanup_theme_install() {
+		[ -n "$tmp" ] && rm -rf "$tmp"
+		release_lock
+	}
+	trap cleanup_theme_install EXIT
+	trap 'exit 1' HUP INT TERM
+	count=$(theme_count)
+	[ "$count" -ge "$THEME_LIMIT" ] && die "theme limit reached ($THEME_LIMIT) - remove a theme first"
+	tmp=$(mktemp -d) || die "could not create a temporary theme directory"
+	# pull only this theme's files: walk the git tree, fetch matching blobs raw
+	if ! python3 - "$CLOVERTHEMES_REPO" "$name" "$tmp" <<'PY'
+import json, os, sys, urllib.parse, urllib.request
+from concurrent.futures import ThreadPoolExecutor
+repo, name, dest = sys.argv[1], sys.argv[2], sys.argv[3]
+def get(url):
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "clover-ctl"})
+    return urllib.request.urlopen(req, timeout=30)
+try:
+    branch = json.load(get(f"https://api.github.com/repos/{repo}")).get("default_branch", "master")
+    tree = json.load(get(f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1")).get("tree", [])
+except Exception as e:
+    sys.exit(f"fetch failed: {e}")
+prefix = name + "/"
+blobs = [t for t in tree if t.get("type") == "blob" and t.get("path", "").startswith(prefix)]
+if not blobs:
+    sys.exit(f"theme not found in repo: {name}")
+def fetch(t):
+    out = os.path.join(dest, t["path"][len(prefix):])
+    os.makedirs(os.path.dirname(out) or dest, exist_ok=True)
+    url = f"https://raw.githubusercontent.com/{repo}/{branch}/" + urllib.parse.quote(t["path"])
+    with get(url) as r, open(out, "wb") as f:
+        f.write(r.read())
+# many small files over wifi - overlap the round-trips
+with ThreadPoolExecutor(max_workers=8) as ex:
+    for _ in ex.map(fetch, blobs):
+        pass
+PY
+	then
+		die "could not download theme: $name"
+	fi
+	# make sure it fits before touching the ESP, keeping headroom for config.plist
+	# rewrites (du under-reports vfat cluster rounding, so reserve a margin)
+	ESP_RESERVE_KB=2048
+	need_kb=$(du -sk "$tmp" 2> /dev/null | cut -f1)
+	free_kb=$(df -Pk "$EFI_PATH" 2> /dev/null | awk 'NR==2 {print $4}')
+	if [ -n "$need_kb" ] && [ -n "$free_kb" ] && [ "$((need_kb + ESP_RESERVE_KB))" -gt "$free_kb" ]
+	then
+		die "theme '$name' needs ${need_kb}KB but only ${free_kb}KB free on the ESP"
+	fi
+	mkdir -p "$themes"
+	# tmp is on tmpfs and the ESP is vfat, so this mv copies - clean up a partial dir if it fails
+	mv "$tmp" "$themes/$name" || { rm -rf "$themes/$name"; die "failed to install theme: $name"; }
+	tmp=""
+	cleanup_theme_install
+	trap - EXIT HUP INT TERM
+	echo "theme installed: $name"
+	;;
+remove-theme)
+	need_root; need_efi
+	name=${1:-}
+	[ -n "$name" ] || die "usage: clover-ctl remove-theme <name>"
+	valid_theme_name "$name"
+	acquire_lock "$EFI_PATH/clover/.theme-operation.lock"
+	installed=$(installed_theme_name "$name")
+	[ -n "$installed" ] || die "theme not installed: $name"
+	installed_folded=$(printf '%s' "$installed" | tr '[:upper:]' '[:lower:]')
+	[ "$installed_folded" = random ] && die "cannot remove the built-in random theme selector"
+	active=$(plist_get Theme "$CONFIG")
+	[ -n "$active" ] || die "could not read the active theme - refusing to remove anything"
+	active_folded=$(printf '%s' "$active" | tr '[:upper:]' '[:lower:]')
+	[ "$installed_folded" = "$active_folded" ] && die "cannot remove the active theme '$installed' - switch themes first"
+	dir="$EFI_PATH/clover/themes/$installed"
+	rm -rf "$dir" || die "failed to remove theme: $installed"
+	release_lock
+	echo "theme removed: $installed"
+	;;
+detect-resolution)
+	detect_native_resolution
+	;;
+version)
+	echo "$CTL_VERSION"
+	;;
+set-resolution)
+	need_root
+	val=${1:-}
+	[ "$val" = auto ] && val=$(detect_native_resolution)
+	[ -n "$val" ] || die "no resolution given and auto-detect failed"
+	case "$val" in [0-9]*x[0-9]*) ;; *) die "invalid resolution: $val (expected WxH)" ;; esac
+	plist_set ScreenResolution string "$val" "$CONFIG" || die "could not update the Clover config"
+	echo "resolution set to $val"
+	;;
+set-theme)
+	need_root; need_efi
+	name=${1:-}
+	[ -n "$name" ] || die "usage: clover-ctl set-theme <name>"
+	valid_theme_name "$name"
+	acquire_lock "$EFI_PATH/clover/.theme-operation.lock"
+	installed=$(installed_theme_name "$name")
+	[ -n "$installed" ] || die "theme not installed: $name"
+	plist_set Theme string "$installed" "$CONFIG" || die "could not update the Clover config"
+	release_lock
+	echo "theme set to $installed"
+	;;
+set-timeout)
+	need_root
+	case "${1:-}" in ''|*[!0-9]*) die "usage: clover-ctl set-timeout <seconds>" ;; esac
+	plist_set Timeout integer "$1" "$CONFIG" || die "could not update the Clover config"
+	echo "timeout set to $1"
+	;;
+set-default-os)
+	need_root
+	case "${1:-}" in
+		windows) plist_set_pair DefaultLoader string '\efi\microsoft\bootmgfw.efi' DefaultVolume string esp "$CONFIG" || die "could not update the Clover config" ;;
+		steamos) plist_set_pair DefaultLoader string '\efi\steamos\steamcl.efi' DefaultVolume string esp "$CONFIG" || die "could not update the Clover config" ;;
+		bazzite) plist_set_pair DefaultLoader string '\EFI\FEDORA\shimx64.efi' DefaultVolume string esp "$CONFIG" || die "could not update the Clover config" ;;
+		lastos) plist_set DefaultVolume string LastBootedVolume "$CONFIG" || die "could not update the Clover config" ;;
+		*) die "usage: clover-ctl set-default-os <windows|steamos|bazzite|lastos>" ;;
+	esac
+	echo "default boot set to $1"
+	;;
+service)
+	need_root; need_efi
+	case "${1:-}" in
+		disable)
+			backup="$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig"
+			active="$EFI_PATH/Microsoft/Boot/bootmgfw.efi"
+			[ -f "$backup" ] || die "Windows EFI backup missing - refusing to disable Clover so Windows stays bootable"
+			acquire_lock "$EFI_PATH/Microsoft/.clover-efi.lock"
+			verified_publish "$backup" "$active" || die "could not restore and verify Windows EFI - leaving Clover enabled"
+			release_lock
+			win=$(efibootmgr | grep -i Windows | colrm 9 | colrm 1 4)
+			[ -n "$win" ] && efibootmgr -n "$win" &> /dev/null
+			systemctl disable --now clover-bootmanager
+			echo "clover service disabled - Windows will boot next"
+			;;
+		enable)
+			systemctl enable --now clover-bootmanager
+			[ -x /etc/systemd/system/clover-bootmanager.sh ] && /etc/systemd/system/clover-bootmanager.sh
+			echo "clover service enabled"
+			;;
+		*) die "usage: clover-ctl service <enable|disable>" ;;
+	esac
+	;;
+protect-windows-efi)
+	protect_windows_efi
+	;;
+install-clover-loader)
+	[ -n "${1:-}" ] || die "usage: clover-ctl install-clover-loader <source>"
+	install_clover_loader "$1"
+	;;
+install-decky)
+	need_root
+	user=${SUDO_USER:-$(id -un 1000 2> /dev/null || echo deck)}
+	home=$(getent passwd "$user" | cut -d: -f6)
+	[ -n "$home" ] || home="/home/$user"
+	[ -d "$home/homebrew" ] || die "Decky Loader not found at $home/homebrew - install Decky first"
+	dest="$home/homebrew/plugins/Clover Dual Boot"
+	# use a local prebuilt plugin if present, otherwise download the prebuilt release
+	src=""
+	for d in "$home/1Clover-tools/decky" "$(dirname "$0")/decky" "$(dirname "$0")/../decky"
+	do
+		[ -f "$d/dist/index.js" ] && { src="$d"; break; }
+	done
+	tmp=""
+	if [ -z "$src" ]
+	then
+		url=${DECKY_PLUGIN_URL:-https://github.com/Hooandee/Handheld-Clover-dualboot/releases/latest/download/clover-dualboot-decky.zip}
+		tmp=$(mktemp -d)
+		echo "No local build found - downloading the prebuilt plugin..."
+		if curl -fsSL "$url" -o "$tmp/p.zip" && python3 -c "
+import zipfile, os
+dest = os.path.realpath('$tmp')
+with zipfile.ZipFile('$tmp/p.zip') as z:
+    for m in z.namelist():
+        p = os.path.realpath(os.path.join(dest, m))
+        if p != dest and not p.startswith(dest + os.sep):
+            raise SystemExit('unsafe path in zip: ' + m)
+    z.extractall(dest)
+"
+		then
+			src=$(dirname "$(find "$tmp" -name plugin.json 2> /dev/null | head -n1)")
+		fi
+		{ [ -n "$src" ] && [ -f "$src/dist/index.js" ]; } || { rm -rf "$tmp"; die "no built plugin available - run 'cd decky && pnpm build', or check your connection"; }
+	fi
+	mkdir -p "$dest/dist"
+	cp "$src/plugin.json" "$src/main.py" "$dest/" && cp "$src/dist/index.js" "$dest/dist/" || { [ -n "$tmp" ] && rm -rf "$tmp"; die "failed to copy plugin into $dest"; }
+	chown -R "$user":"$user" "$dest" 2> /dev/null || true
+	[ -n "$tmp" ] && rm -rf "$tmp"
+	systemctl restart plugin_loader 2> /dev/null && echo "Decky restarted." || echo "Installed - reload Decky to see it."
+	echo "Decky plugin installed to: $dest"
+	;;
+diagnostics)
+	need_root
+	user=${SUDO_USER:-$(id -un 1000 2> /dev/null || echo "$USER")}
+	home=$(getent passwd "$user" | cut -d: -f6)
+	[ -n "$home" ] || home="$HOME"
+	out="$home/clover-report-$(date +%Y%m%d-%H%M%S).txt"
+	{
+		echo "# Clover diagnostics - $(date)"
+		echo; echo "## OS"; grep -E 'PRETTY_NAME|VERSION_ID|BUILD_ID' /etc/os-release 2> /dev/null
+		echo; echo "## Device (DMI)"
+		for f in sys_vendor product_name board_name; do echo "$f: $(cat /sys/class/dmi/id/$f 2> /dev/null)"; done
+		echo; echo "## clover-ctl status"; "$0" status 2>&1
+		echo; echo "## EFI boot entries"; efibootmgr 2>&1 | grep -iv 'Boot2\|PXE'
+		echo; echo "## config.plist"; grep -A1 -E 'ScreenResolution|<key>Theme|<key>Timeout|DefaultLoader|DefaultVolume' "$CONFIG" 2> /dev/null
+		echo; echo "## boot-manager status"; cat "$home/1Clover-tools/status.txt" 2> /dev/null
+		echo; echo "## service log"; journalctl -u clover-bootmanager -n 40 --no-pager 2> /dev/null
+	} > "$out" 2>&1
+	chown "$user":"$user" "$out" 2> /dev/null || true
+	echo "$out"
+	;;
+set-batocera)
+	need_root
+	case "${1:-}" in
+		v39) loader='\efi\batocera\grubx64.efi' ;;
+		v38) loader='\efi\boot\bootx64.efi' ;;
+		*) die "usage: clover-ctl set-batocera <v38|v39>" ;;
+	esac
+	PLIST_VAL="$loader" awk '
+		s == 2 { print "\t\t\t\t\t<string>" ENVIRON["PLIST_VAL"] "</string>"; s = 0; next }
+		s == 1 { s = 2; print; next }
+		{ print }
+		/<string>os_batocera<\/string>/ { s = 1 }
+	' "$CONFIG" > "$CONFIG.cloverctl.tmp" && mv "$CONFIG.cloverctl.tmp" "$CONFIG"
+	echo "batocera config set to $1"
+	;;
+list-logos)
+	home=$(getent passwd "${SUDO_USER:-$(id -un 1000 2> /dev/null)}" | cut -d: -f6)
+	[ -n "$home" ] || home="$HOME"
+	ls "$home/1Clover-tools/logos" 2> /dev/null | grep -i '\.png$'
+	;;
+set-logo)
+	need_root; need_efi
+	home=$(getent passwd "${SUDO_USER:-$(id -un 1000 2> /dev/null)}" | cut -d: -f6)
+	[ -n "$home" ] || home="$HOME"
+	[ -n "${1:-}" ] || die "usage: clover-ctl set-logo <name.png>"
+	src="$home/1Clover-tools/logos/$1"
+	[ -f "$src" ] || die "logo not found: $src"
+	mkdir -p "$EFI_PATH/steamos"
+	cp "$src" "$EFI_PATH/steamos/steamos.png"
+	echo "boot logo set to $1"
+	;;
+reset-logo)
+	need_root; need_efi
+	rm -f "$EFI_PATH/steamos/steamos.png"
+	echo "boot logo restored to default"
+	;;
+uninstall)
+	need_root; need_efi
+	home=$(getent passwd "${SUDO_USER:-$(id -un 1000 2> /dev/null)}" | cut -d: -f6)
+	[ -n "$home" ] || home="$HOME"
+	systemctl disable --now clover-bootmanager.service &> /dev/null || true
+	if [ -f "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" ]
+	then
+		acquire_lock "$EFI_PATH/Microsoft/.clover-efi.lock"
+		verified_publish "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" \
+			|| die "could not restore and verify the Windows EFI loader - uninstall aborted"
+		rm -f "$EFI_PATH/Microsoft/bootmgfw.efi"
+		release_lock
+	fi
+	if [ -f "$BOOTX64.orig" ]
+	then
+		acquire_lock "$EFI_PATH/.clover-efi.lock"
+		verified_publish "$BOOTX64.orig" "$BOOTX64" \
+			|| die "could not restore and verify the original BOOTX64 loader - uninstall aborted"
+		release_lock
+	fi
+	rm -rf "$EFI_PATH/clover"
+	rm -f "$EFI_PATH/steamos/steamos.png"
+	for e in $(efibootmgr 2> /dev/null | grep "Clover - GUI" | colrm 9 | colrm 1 4)
+	do
+		efibootmgr -b "$e" -B &> /dev/null
+	done
+	ro=$(command -v steamos-readonly)
+	[ -n "$ro" ] && steamos-readonly disable 2> /dev/null
+	rm -f /etc/systemd/system/clover-bootmanager*
+	rm -rf /etc/clover-dualboot
+	systemctl daemon-reload 2> /dev/null
+	rm -f /etc/atomic-update.conf.d/clover-whitelist.conf
+	[ -n "$ro" ] && steamos-readonly enable 2> /dev/null
+	rm -f "$home/.local/share/kservices5/ServiceMenus/open_as_root.desktop"
+	rm -f "$home/.local/share/applications/clover-dualboot.desktop" "$home/Desktop/clover-dualboot.desktop" "$home/Desktop/Clover-Toolbox"
+	rm -rf "$home/1Clover-tools"
+	echo "Clover uninstalled - reboot to return to Windows."
+	;;
+theme-preview)
+	need_root; need_efi
+	name=${1:-}
+	[ -n "$name" ] || die "usage: clover-ctl theme-preview <name>"
+	valid_theme_name "$name"
+	dir="$EFI_PATH/clover/themes/$name"
+	[ -d "$dir" ] || die "theme not found: $name"
+	tmp="/tmp/clover-theme-preview"
+	rm -rf "$tmp"
+	mkdir -p "$tmp"
+	chmod 755 "$tmp"
+	# background image (printed as: background<TAB>path)
+	bg=$(ls "$dir" 2> /dev/null | grep -iE '\.(png|jpg|jpeg)$' | grep -i background | head -n1)
+	[ -n "$bg" ] || bg=$(ls "$dir" 2> /dev/null | grep -iE 'screenshot.*\.(png|jpg|jpeg)$' | head -n1)
+	[ -n "$bg" ] || bg=$(ls "$dir" 2> /dev/null | grep -iE '\.(png|jpg|jpeg)$' | head -n1)
+	if [ -n "$bg" ]
+	then
+		cp "$dir/$bg" "$tmp/" 2> /dev/null && chmod 644 "$tmp/$bg" && printf 'background\t%s\n' "$tmp/$bg"
+	fi
+	# theme icons (prefer an icons/ subfolder); .icns is rendered by the app
+	icondir="$dir"
+	[ -d "$dir/icons" ] && icondir="$dir/icons"
+	ls "$icondir" 2> /dev/null | grep -iE '^(os_|func_|vol_|tool_|pointer|selection|radio_)' | grep -iE '\.(png|icns|jpg|jpeg)$' | head -n 12 | while read -r f
+	do
+		cp "$icondir/$f" "$tmp/$f" 2> /dev/null && chmod 644 "$tmp/$f" && printf 'icon\t%s\n' "$tmp/$f"
+	done
+	;;
+help|--help|-h)
+	cat <<'USAGE'
+clover-ctl <command> [args]
+  status                                            current config + state as JSON
+  get <resolution|theme|timeout|default-os>         read one value
+  list-themes                                       installed Clover themes
+  list-remote-themes                                themes available in the CloverThemes repo
+  install-theme <name>                              (root) download + install a theme (max 5 on the ESP)
+  remove-theme <name>                               (root) delete an installed theme (not the active one)
+  detect-resolution                                 native panel resolution
+  version                                           print the tool version
+  set-resolution <WxH|auto>                         (root)
+  set-theme <name>                                  (root)
+  set-timeout <seconds>                             (root)
+  set-default-os <windows|steamos|bazzite|lastos>   (root)
+  service <enable|disable>                          (root) enable Clover, or hand next boot to Windows
+  protect-windows-efi                              (root) verify/refresh the Windows backup, then disable its canonical loader
+  install-clover-loader <source>                   (root) verify backup and atomically publish Clover as BOOTX64
+  install-decky                                     (root) install/update the Decky (Game Mode) plugin
+  diagnostics                                       (root) write a bug-report bundle to your home folder
+  set-batocera <v38|v39>                            (root) point the Batocera entry at the right loader
+  list-logos                                        list available boot logos
+  set-logo <name.png>                               (root) set the boot (BGRT) logo
+  reset-logo                                        (root) restore the default boot logo
+  uninstall                                         (root) remove Clover and restore the Windows bootloader
+  theme-preview <name>                              (root) copy a theme's preview image to /tmp, print the path
+USAGE
+	;;
+*)
+	die "unknown command: $CMD (try: clover-ctl help)"
+	;;
+esac
