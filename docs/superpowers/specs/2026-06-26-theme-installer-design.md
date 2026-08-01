@@ -26,6 +26,10 @@ the repo's standing rule. Network/JSON work is done with `python3` invoked inlin
 matching the existing `install-decky` precedent (the engine stays self-contained and
 language-agnostic to frontends).
 
+Theme mutations share one lock so install, activate and remove cannot race each other.
+Boot-loader mutations use separate EFI locks and verified same-filesystem staging before
+publishing either Windows or Clover loaders.
+
 ```
 GUI (PySide6) ──sudo──> clover-ctl install-theme <name> ──curl/python3──> GitHub (CloverThemes)
                                     │

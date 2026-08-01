@@ -38,7 +38,7 @@ CTL = find_ctl()
 TIMEOUTS = ["1", "5", "10", "15", "60"]
 THEME_LIMIT = 5  # mirrors clover-ctl: the ESP only fits a handful of themes
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ICON = os.path.join(HERE, "clover.png")
 FLAG_DIR = os.path.join(HERE, "flags")

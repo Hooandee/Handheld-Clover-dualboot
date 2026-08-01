@@ -410,27 +410,12 @@ done
 # install Clover to the EFI system partition
 echo -e "$current_password\n" | sudo -S efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Clover - GUI Boot Manager" -l "$CLOVER_EFI" &> /dev/null
 
-# check if bootx64.efi.orig already exists
-echo -e "$current_password\n" | sudo -S test -e $BOOTX64.orig
-if [ $? -eq 0 ]
-then
-	msg bootx64_orig_found "$BOOTX64"
-else
-	msg bootx64_backup_missing "$BOOTX64"
-	if ! echo -e "$current_password\n" | sudo -S cp "$BOOTX64" "$BOOTX64.orig" \
-		|| ! echo -e "$current_password\n" | sudo -S cmp -s "$BOOTX64" "$BOOTX64.orig"
-	then
-		msg bootx64_copy_failed "$BOOTX64"
-		exit 1
-	fi
-fi
-
-if echo -e "$current_password\n" | sudo -S cp "$EFI_PATH/clover/cloverx64.efi" "$BOOTX64" \
-	&& echo -e "$current_password\n" | sudo -S cmp -s "$EFI_PATH/clover/cloverx64.efi" "$BOOTX64"
+# create a verified backup and atomically publish Clover as BOOTX64
+if echo -e "$current_password\n" | sudo -S env CLOVER_EFI_PATH="$EFI_PATH" CLOVER_BOOTX_PATH="$BOOTX64" \
+	./clover-ctl install-clover-loader "$EFI_PATH/clover/cloverx64.efi"
 then
 	msg bootx64_copy_done "$BOOTX64"
 else
-	echo -e "$current_password\n" | sudo -S cp "$BOOTX64.orig" "$BOOTX64" &> /dev/null
 	msg bootx64_copy_failed "$BOOTX64"
 	exit 1
 fi
@@ -445,6 +430,8 @@ else
 fi
 
 # re-arrange the boot order and make Clover the priority!
+CLOVER=$(efibootmgr | grep -i "Clover - GUI" | colrm 9 | colrm 1 4)
+[ -n "$CLOVER" ] || { msg clover_install_fail; exit 1; }
 echo -e "$current_password\n" | sudo -S efibootmgr -n $CLOVER &> /dev/null
 echo -e "$current_password\n" | sudo -S efibootmgr -o $CLOVER &> /dev/null
 
@@ -468,7 +455,10 @@ then
 	msg tools_install_failed
 	exit 1
 fi
-if ! echo -e "$current_password\n" | sudo -S cp custom/clover-bootmanager.service custom/clover-bootmanager.sh /etc/systemd/system
+if ! echo -e "$current_password\n" | sudo -S mkdir -p /etc/clover-dualboot \
+	|| ! echo -e "$current_password\n" | sudo -S cp clover-ctl /etc/clover-dualboot/clover-ctl \
+	|| ! echo -e "$current_password\n" | sudo -S chmod +x /etc/clover-dualboot/clover-ctl \
+	|| ! echo -e "$current_password\n" | sudo -S cp custom/clover-bootmanager.service custom/clover-bootmanager.sh /etc/systemd/system
 then
 	msg service_install_failed
 	exit 1

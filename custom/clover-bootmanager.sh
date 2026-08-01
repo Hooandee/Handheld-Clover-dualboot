@@ -78,7 +78,7 @@ else
 fi
 
 # verify/refresh the restorable Windows loader before disabling its canonical path
-CLOVER_CTL=/home/$OWNER/1Clover-tools/clover-ctl
+CLOVER_CTL=/etc/clover-dualboot/clover-ctl
 if [ -x "$CLOVER_CTL" ] \
 	&& CLOVER_EFI_PATH="$EFI_PATH" "$CLOVER_CTL" protect-windows-efi >> "$CloverStatus" 2>&1
 then

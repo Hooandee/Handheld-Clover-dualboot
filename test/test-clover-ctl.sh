@@ -95,11 +95,13 @@ case "$status" in
 esac
 rm -rf "$EFI/clover/themes/"{A,B,C,D,NewOne}
 
-mkdir -p "$EFI/clover/.theme-install.lock"
+mkdir -p "$EFI/clover/.theme-operation.lock"
+printf '%s\n' "$$" > "$EFI/clover/.theme-operation.lock/pid"
 PATH="$FAKEBIN:$PATH" bash "$CTL" install-theme NewOne > /dev/null 2>&1
 expect "install-theme refuses a concurrent install" "$?" "1"
 expect "concurrent install did not publish a theme" "$([ -d "$EFI/clover/themes/NewOne" ] && echo yes || echo no)" "no"
-rmdir "$EFI/clover/.theme-install.lock"
+rm -f "$EFI/clover/.theme-operation.lock/pid"
+rmdir "$EFI/clover/.theme-operation.lock"
 
 mkdir -p "$EFI/clover/themes/Alpha"
 PATH="$FAKEBIN:$PATH" bash "$CTL" install-theme alpha > /dev/null 2>&1
@@ -156,6 +158,15 @@ rm -f "$WIN_BOOT/bootmgfw.efi" "$WIN_BOOT/bootmgfw.efi.orig" \
 	"$WIN_BOOT/bootmgfw.efi.orig.prev" "$EFI/Microsoft/bootmgfw.efi"
 bash "$CTL" protect-windows-efi > /dev/null 2>&1
 expect "missing Windows loader and backup fails closed" "$?" "1"
+
+BOOT_DIR="$EFI/boot"
+mkdir -p "$BOOT_DIR"
+printf 'original-loader\n' > "$BOOT_DIR/bootx64.efi"
+printf 'clover-loader\n' > "$EFI/cloverx64.efi"
+CLOVER_BOOTX_PATH="$BOOT_DIR/bootx64.efi" bash "$CTL" install-clover-loader "$EFI/cloverx64.efi" > /dev/null 2>&1
+expect "verified Clover loader publication succeeds" "$?" "0"
+expect "original BOOTX64 backup is preserved" "$(cat "$BOOT_DIR/bootx64.efi.orig")" "original-loader"
+expect "Clover loader becomes canonical BOOTX64" "$(cat "$BOOT_DIR/bootx64.efi")" "clover-loader"
 
 rm -rf "$EFI" "$FAKEBIN"
 rm -f "$TMP" "$TMP.cloverctl.tmp"

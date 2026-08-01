@@ -8,7 +8,7 @@
 
 set -u
 
-CTL_VERSION="1.0.0"
+CTL_VERSION="1.1.0"
 
 # the ESP is tiny (~25MB free), so cap how many theme folders may live on it
 THEME_LIMIT=5
@@ -28,6 +28,7 @@ detect_os() {
 detect_os
 # CLOVER_EFI_PATH lets the tests point the theme commands at a throwaway tree
 EFI_PATH=${CLOVER_EFI_PATH:-$EFI_PATH}
+BOOTX64=${CLOVER_BOOTX_PATH:-$BOOTX64}
 CONFIG=${CLOVER_CONFIG:-${EFI_PATH:+$EFI_PATH/clover/config.plist}}
 
 die() { echo "clover-ctl: $1" >&2; exit 1; }
@@ -52,6 +53,44 @@ installed_theme_name() {
 need_root() {
 	[ "${CLOVER_CTL_ALLOW_NONROOT:-}" = 1 ] && return 0
 	[ "$(id -u)" = 0 ] || die "must run as root (try: sudo clover-ctl $CMD ...)"
+}
+
+release_lock() {
+	[ -n "${LOCK_DIR:-}" ] || return 0
+	rm -f "$LOCK_DIR/pid" 2> /dev/null
+	rmdir "$LOCK_DIR" 2> /dev/null || true
+	LOCK_DIR=""
+}
+
+acquire_lock() {
+	wanted_lock=$1
+	if ! mkdir "$wanted_lock" 2> /dev/null
+	then
+		lock_pid=$(cat "$wanted_lock/pid" 2> /dev/null)
+		if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2> /dev/null
+		then
+			die "another Clover operation is already running"
+		fi
+		rm -f "$wanted_lock/pid" 2> /dev/null
+		rmdir "$wanted_lock" 2> /dev/null && mkdir "$wanted_lock" 2> /dev/null \
+			|| die "could not acquire the Clover operation lock"
+	fi
+	LOCK_DIR=$wanted_lock
+	printf '%s\n' "$$" > "$LOCK_DIR/pid" || { release_lock; die "could not record the Clover operation lock"; }
+	trap release_lock EXIT
+	trap 'exit 1' HUP INT TERM
+}
+
+verified_publish() {
+	source_file=$1
+	target_file=$2
+	stage="$target_file.cloverctl.$$"
+	rm -f "$stage"
+	cp "$source_file" "$stage" && cmp -s "$source_file" "$stage" \
+		&& mv -f "$stage" "$target_file" && cmp -s "$source_file" "$target_file" \
+		&& return 0
+	rm -f "$stage"
+	return 1
 }
 
 # value of a <key> in a plist - the text on the following line, tags stripped
@@ -116,6 +155,7 @@ protect_windows_efi() {
 	previous="$active.orig.prev"
 	disabled="$EFI_PATH/Microsoft/bootmgfw.efi"
 	[ -d "$win_boot" ] || die "Windows EFI directory not found: $win_boot"
+	acquire_lock "$EFI_PATH/Microsoft/.clover-efi.lock"
 	if [ -e "$active" ]
 	then
 		refresh_windows_backup "$active" "$backup" "$previous" \
@@ -124,9 +164,11 @@ protect_windows_efi() {
 			|| die "could not disable the Windows EFI loader - leaving Windows enabled"
 		if ! cmp -s "$backup" "$disabled"
 		then
-			mv -f "$disabled" "$active" 2> /dev/null || true
-			die "Windows EFI verification failed - restored the canonical loader"
+			verified_publish "$backup" "$active" \
+				|| die "Windows EFI verification and verified rollback both failed; the backup remains at $backup"
+			die "Windows EFI verification failed; the canonical loader was restored from the verified backup"
 		fi
+		release_lock
 		echo "Windows EFI loader protected and disabled"
 		return 0
 	fi
@@ -137,7 +179,30 @@ protect_windows_efi() {
 		refresh_windows_backup "$disabled" "$backup" "$previous" \
 			|| die "could not refresh the Windows EFI backup"
 	fi
+	release_lock
 	echo "Windows EFI loader already disabled with a verified backup"
+}
+
+install_clover_loader() {
+	need_root; need_efi
+	source_loader=$1
+	[ -s "$source_loader" ] || die "Clover loader not found: $source_loader"
+	[ -n "$BOOTX64" ] || die "canonical BOOTX64 path is unknown"
+	mkdir -p "$(dirname "$BOOTX64")" || die "could not create the BOOTX64 directory"
+	acquire_lock "$EFI_PATH/.clover-efi.lock"
+	backup="$BOOTX64.orig"
+	if [ ! -e "$backup" ]
+	then
+		[ -s "$BOOTX64" ] || die "original BOOTX64 loader is missing"
+		verified_publish "$BOOTX64" "$backup" || die "could not create a verified BOOTX64 backup"
+	fi
+	verified_publish "$source_loader" "$BOOTX64" || {
+		verified_publish "$backup" "$BOOTX64" \
+			|| die "Clover loader publication and verified BOOTX64 rollback both failed; backup remains at $backup"
+		die "could not publish the Clover loader; original BOOTX64 was restored"
+	}
+	release_lock
+	echo "Clover loader installed at $BOOTX64"
 }
 
 # native panel resolution from the kernel, normalized to landscape (panels are often mounted rotated)
@@ -234,14 +299,14 @@ install-theme)
 	themes="$EFI_PATH/clover/themes"
 	installed=$(installed_theme_name "$name")
 	[ -n "$installed" ] && die "theme already installed: $installed"
-	lock="$EFI_PATH/clover/.theme-install.lock"
-	mkdir "$lock" 2> /dev/null || die "another theme installation is already running"
+	acquire_lock "$EFI_PATH/clover/.theme-operation.lock"
 	tmp=""
 	cleanup_theme_install() {
 		[ -n "$tmp" ] && rm -rf "$tmp"
-		rmdir "$lock" 2> /dev/null || true
+		release_lock
 	}
-	trap cleanup_theme_install EXIT HUP INT TERM
+	trap cleanup_theme_install EXIT
+	trap 'exit 1' HUP INT TERM
 	count=$(theme_count)
 	[ "$count" -ge "$THEME_LIMIT" ] && die "theme limit reached ($THEME_LIMIT) - remove a theme first"
 	tmp=$(mktemp -d) || die "could not create a temporary theme directory"
@@ -298,6 +363,7 @@ remove-theme)
 	name=${1:-}
 	[ -n "$name" ] || die "usage: clover-ctl remove-theme <name>"
 	valid_theme_name "$name"
+	acquire_lock "$EFI_PATH/clover/.theme-operation.lock"
 	installed=$(installed_theme_name "$name")
 	[ -n "$installed" ] || die "theme not installed: $name"
 	installed_folded=$(printf '%s' "$installed" | tr '[:upper:]' '[:lower:]')
@@ -308,6 +374,7 @@ remove-theme)
 	[ "$installed_folded" = "$active_folded" ] && die "cannot remove the active theme '$installed' - switch themes first"
 	dir="$EFI_PATH/clover/themes/$installed"
 	rm -rf "$dir" || die "failed to remove theme: $installed"
+	release_lock
 	echo "theme removed: $installed"
 	;;
 detect-resolution)
@@ -330,9 +397,11 @@ set-theme)
 	name=${1:-}
 	[ -n "$name" ] || die "usage: clover-ctl set-theme <name>"
 	valid_theme_name "$name"
+	acquire_lock "$EFI_PATH/clover/.theme-operation.lock"
 	installed=$(installed_theme_name "$name")
 	[ -n "$installed" ] || die "theme not installed: $name"
 	plist_set Theme string "$installed" "$CONFIG" || die "could not update the Clover config"
+	release_lock
 	echo "theme set to $installed"
 	;;
 set-timeout)
@@ -356,8 +425,12 @@ service)
 	need_root; need_efi
 	case "${1:-}" in
 		disable)
-			[ -f "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" ] || die "Windows EFI backup missing - refusing to disable Clover so Windows stays bootable"
-			cp "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" || die "could not restore Windows EFI - leaving Clover enabled"
+			backup="$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig"
+			active="$EFI_PATH/Microsoft/Boot/bootmgfw.efi"
+			[ -f "$backup" ] || die "Windows EFI backup missing - refusing to disable Clover so Windows stays bootable"
+			acquire_lock "$EFI_PATH/Microsoft/.clover-efi.lock"
+			verified_publish "$backup" "$active" || die "could not restore and verify Windows EFI - leaving Clover enabled"
+			release_lock
 			win=$(efibootmgr | grep -i Windows | colrm 9 | colrm 1 4)
 			[ -n "$win" ] && efibootmgr -n "$win" &> /dev/null
 			systemctl disable --now clover-bootmanager
@@ -373,6 +446,10 @@ service)
 	;;
 protect-windows-efi)
 	protect_windows_efi
+	;;
+install-clover-loader)
+	[ -n "${1:-}" ] || die "usage: clover-ctl install-clover-loader <source>"
+	install_clover_loader "$1"
 	;;
 install-decky)
 	need_root
@@ -477,9 +554,15 @@ uninstall)
 	[ -n "$home" ] || home="$HOME"
 	if [ -f "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" ]
 	then
-		mv "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" && rm -f "$EFI_PATH/Microsoft/bootmgfw.efi"
+		verified_publish "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" \
+			|| die "could not restore and verify the Windows EFI loader - uninstall aborted"
+		rm -f "$EFI_PATH/Microsoft/bootmgfw.efi"
 	fi
-	[ -f "$BOOTX64.orig" ] && mv "$BOOTX64.orig" "$BOOTX64"
+	if [ -f "$BOOTX64.orig" ]
+	then
+		verified_publish "$BOOTX64.orig" "$BOOTX64" \
+			|| die "could not restore and verify the original BOOTX64 loader - uninstall aborted"
+	fi
 	rm -rf "$EFI_PATH/clover"
 	rm -f "$EFI_PATH/steamos/steamos.png"
 	for e in $(efibootmgr 2> /dev/null | grep "Clover - GUI" | colrm 9 | colrm 1 4)
@@ -490,6 +573,7 @@ uninstall)
 	[ -n "$ro" ] && steamos-readonly disable 2> /dev/null
 	systemctl disable --now clover-bootmanager.service &> /dev/null
 	rm -f /etc/systemd/system/clover-bootmanager*
+	rm -rf /etc/clover-dualboot
 	systemctl daemon-reload 2> /dev/null
 	rm -f /etc/atomic-update.conf.d/clover-whitelist.conf
 	[ -n "$ro" ] && steamos-readonly enable 2> /dev/null
@@ -542,6 +626,7 @@ clover-ctl <command> [args]
   set-default-os <windows|steamos|bazzite|lastos>   (root)
   service <enable|disable>                          (root) enable Clover, or hand next boot to Windows
   protect-windows-efi                              (root) verify/refresh the Windows backup, then disable its canonical loader
+  install-clover-loader <source>                   (root) verify backup and atomically publish Clover as BOOTX64
   install-decky                                     (root) install/update the Decky (Game Mode) plugin
   diagnostics                                       (root) write a bug-report bundle to your home folder
   set-batocera <v38|v39>                            (root) point the Batocera entry at the right loader
