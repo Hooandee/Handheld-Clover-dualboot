@@ -1,43 +1,80 @@
 #!/bin/bash
 
-# Device registry for the Clover installer. Sourced by install-clover.sh.
-# To add a handheld, add one row below. Columns are pipe-separated:
+# Device capabilities used by the Clover installer.
+# Columns are pipe-separated:
 #
-#   match_field | match_value | friendly_name | action
+#   match_field | match_mode | match_value | friendly_name | fallback_resolution | controller_policy
 #
-#   match_field  : "board"   matches /sys/class/dmi/id/board_name
-#                  "product" matches /sys/class/dmi/id/product_name
-#   action       : a "WxH" resolution to set in Clover (controller driver installed)
-#                  "nodriver" -> supported, no resolution change, no controller driver (Steam Deck)
-#                  "blocked"  -> known incompatible, installer refuses to run
+# match_field       : board, product, family or vendor
+# match_mode        : exact, prefix or contains
+# controller_policy : xpad installs UsbXbox360Dxe.efi
+#                     none never installs it on this hardware
+#                     ask lets an interactive user opt in, defaulting to none
 
 DEVICE_REGISTRY="\
-board|Jupiter|Steam Deck|nodriver
-board|Galileo|Steam Deck|nodriver
-product|83L3|Legion Go S|1920x1200
-product|83Q2|Legion Go S|1920x1200
-product|83Q3|Legion Go S|1920x1200
-product|83N6|Legion Go S|blocked
-product|83E1|Legion Go|2560x1600
-product|83N0|Legion Go 2|1920x1200
-product|83N1|Legion Go 2|1920x1200
-board|RC71L|Asus ROG Ally|1920x1080
-board|RC72LA|Asus ROG Ally X|1920x1080
-board|RC73YA|Asus ROG Xbox Ally|1920x1080
-board|RC73XA|Asus ROG Xbox Ally X|1920x1080
-product|ONEXPLAYER 2 PRO ARP23P|Onexplayer 2 Pro|2560x1600"
+board|exact|Jupiter|Steam Deck|1280x800|none
+board|exact|Galileo|Steam Deck OLED|1280x800|none
+board|exact|RC71L|ROG Ally|1920x1080|xpad
+board|exact|RC72LA|ROG Ally X|1920x1080|xpad
+board|exact|RC73YA|ROG Xbox Ally|1920x1080|xpad
+board|exact|RC73XA|ROG Xbox Ally X|1920x1080|xpad
+product|contains|ROG Xbox Ally X|ROG Xbox Ally X|1920x1080|xpad
+product|contains|ROG Xbox Ally|ROG Xbox Ally|1920x1080|xpad
+product|contains|ROG Ally X|ROG Ally X|1920x1080|xpad
+product|contains|ROG Ally|ROG Ally|1920x1080|xpad
+product|prefix|83N6|Legion Go S|1920x1200|none
+product|prefix|83L3|Legion Go S|1920x1200|xpad
+product|prefix|83Q2|Legion Go S|1920x1200|xpad
+product|prefix|83Q3|Legion Go S|1920x1200|xpad
+product|prefix|83N0|Legion Go 2|1920x1200|xpad
+product|prefix|83N1|Legion Go 2|1920x1200|xpad
+product|prefix|83E1|Legion Go|2560x1600|xpad
+family|contains|Legion Go S|Legion Go S|1920x1200|none
+family|contains|Legion Go 2|Legion Go 2|1920x1200|xpad
+product|contains|Claw 8 AI+|MSI Claw 8 AI+|1920x1200|ask
+product|exact|ONEXPLAYER 2 PRO ARP23P|OneXPlayer 2 Pro|2560x1600|xpad"
 
-# Match the given board_name / product_name against the registry.
-# Echoes "friendly_name|action" and returns 0 on a hit, returns 1 otherwise.
+normalize_dmi_value() {
+	printf '%s' "$1" \
+		| sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+		| tr '[:lower:]' '[:upper:]'
+}
+
+registry_candidate() {
+	case "$1" in
+		board) printf '%s' "$2" ;;
+		product) printf '%s' "$3" ;;
+		family) printf '%s' "$4" ;;
+		vendor) printf '%s' "$5" ;;
+		*) return 1 ;;
+	esac
+}
+
+registry_matches() {
+	case "$1" in
+		exact) [ "$2" = "$3" ] ;;
+		prefix) case "$2" in "$3"*) return 0 ;; *) return 1 ;; esac ;;
+		contains) case "$2" in *"$3"*) return 0 ;; *) return 1 ;; esac ;;
+		*) return 1 ;;
+	esac
+}
+
+# Echoes "friendly_name|fallback_resolution|controller_policy" on a hit.
 lookup_device() {
-	local board="$1" product="$2" field value name action
-	while IFS='|' read -r field value name action
+	local board="$1" product="$2" family="${3:-}" vendor="${4:-}"
+	local field mode value name resolution controller candidate wanted
+	while IFS='|' read -r field mode value name resolution controller
 	do
 		[ -n "$field" ] || continue
-		case "$field" in
-			board)   [ "$board" = "$value" ]   && { echo "$name|$action"; return 0; } ;;
-			product) [ "$product" = "$value" ] && { echo "$name|$action"; return 0; } ;;
-		esac
+		candidate=$(registry_candidate "$field" "$board" "$product" "$family" "$vendor") \
+			|| continue
+		candidate=$(normalize_dmi_value "$candidate")
+		wanted=$(normalize_dmi_value "$value")
+		if registry_matches "$mode" "$candidate" "$wanted"
+		then
+			printf '%s|%s|%s\n' "$name" "$resolution" "$controller"
+			return 0
+		fi
 	done <<EOF
 $DEVICE_REGISTRY
 EOF
