@@ -365,7 +365,8 @@ if [ "$XPAD_DRIVER" = "yes" ]
 then
 	msg installing_xpad
 	echo -e "$current_password\n" | sudo -S bash custom/manage-controller-driver.sh install \
-		custom/UsbXbox360Dxe.efi "$EFI_PATH/clover/drivers/uefi"
+		custom/UsbXbox360Dxe.efi "$EFI_PATH/clover/drivers/uefi" \
+		custom/xbox360-clover.ini "$EFI_PATH/Xbox360"
 	if [ $? -eq 0 ]
 	then
 		msg xpad_ok
