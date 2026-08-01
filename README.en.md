@@ -12,7 +12,7 @@ This project is based on the original work by ryanrudolf, [SteamDeck-Clover-dual
 * **Theme installer**, built into the app: downloads from CloverThemes, protects the active theme and checks EFI partition space.
 * **Clover Toolbox**, retained as the classic compatibility interface.
 * **Boot-manager service** that checks the dual boot on every startup and auto-repairs broken boot entries.
-* **XBOX 360 controller UEFI driver** by [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) and [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe), enabled only on models with known compatibility.
+* **XBOX 360 controller UEFI driver** by [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe), [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe) and [jlobue10](https://github.com/jlobue10/UsbXbox360Dxe), enabled only on models with known compatibility.
 * **Eclipse theme** by [chris1111](https://github.com/chris1111/).
 
 ## Supported devices
@@ -34,16 +34,16 @@ The ellipsis means full SKU strings are also recognized, for example `83N6000MSB
 
 Got **another handheld**? It works in safe generic mode: the installer reads your panel's native resolution from the kernel and asks you to continue. It does not automatically install UEFI drivers without known compatibility.
 
-> **Legion Go S `83N6`:** Clover installs normally, but the XBOX 360 controller UEFI driver is disabled because it is incompatible with this variant. The menu remains usable with a keyboard or any input device exposed by the firmware.
-
 ### Using the controller inside the Clover menu
-On models with known compatibility, the installer adds the XBOX 360 controller UEFI driver so the built-in gamepad works in the boot menu. It is disabled on the Steam Deck and Legion Go S `83N6`; on unverified models the installer asks before adding it.
+On models with known compatibility, including the Legion Go S `83N6`, the installer adds the XBOX 360 controller UEFI driver so the built-in gamepad works in the boot menu. It is disabled on the Steam Deck; on unverified models the installer asks before adding it.
 * **D-pad**: move (arrow keys)
 * **A** = Enter, **B** = Esc
 * **Right trigger** = left click, **left trigger** = right click
 * If the D-pad doesn't respond, use the left thumbstick to move the mouse pointer.
 
-If Clover hangs on a Legion Go (the driver sometimes keeps polling the controller), delete the driver and reboot:
+Touch input only works when the device firmware exposes a UEFI pointer device. On the Legion Go S `83N6`, the touchscreen is connected over I²C and is not available to Clover; use the built-in controller, touchpad or a USB keyboard.
+
+If a particular firmware has trouble with the controller driver, disable it and reboot:
 ```bash
 sudo rm /esp/efi/clover/drivers/uefi/UsbXbox360Dxe.efi
 ```

@@ -25,10 +25,10 @@ check "" 83L3 "" Lenovo               "Legion Go S|1920x1200|xpad"
 check "" 83L30030US "" Lenovo         "Legion Go S|1920x1200|xpad"
 check "" 83Q2ABC "" Lenovo            "Legion Go S|1920x1200|xpad"
 check "" 83Q3ABC "" Lenovo            "Legion Go S|1920x1200|xpad"
-check "" 83N6 "" Lenovo               "Legion Go S|1920x1200|none"
-check "" 83N6000MSB "" LENOVO         "Legion Go S|1920x1200|none"
+check "" 83N6 "" Lenovo               "Legion Go S|1920x1200|xpad"
+check "" 83N6000MSB "" LENOVO         "Legion Go S|1920x1200|xpad"
 check "" UnknownSku "Legion Go S 8APU1" Lenovo \
-	"Legion Go S|1920x1200|none"
+	"Legion Go S|1920x1200|xpad"
 check "" 83E1ABC "" Lenovo            "Legion Go|2560x1600|xpad"
 check "" 83N0ABC "" Lenovo            "Legion Go 2|1920x1200|xpad"
 check "" 83N1ABC "" Lenovo            "Legion Go 2|1920x1200|xpad"
@@ -126,7 +126,7 @@ then
 	rm -rf "$DRM_FIXTURE"
 	mkdir -p "$DRM_FIXTURE"
 	expect_profile "" 83N6000MSB "" Lenovo \
-		"Legion Go S|1920x1200|registry|none"
+		"Legion Go S|1920x1200|registry|xpad"
 	expect_profile RC72LA "" "" ASUSTeK \
 		"ROG Ally X|1920x1080|registry|xpad"
 	expect_profile "" "Claw 8 AI+ A2VM" "" MSI \
@@ -166,7 +166,7 @@ expect_report() {
 expect_report "identifies the full Legion Go S SKU" "Detected profile: Legion Go S"
 expect_report "reports normalized native resolution" "Native resolution: 1920x1200"
 expect_report "reports the safe fallback" "Fallback resolution: 1920x1200"
-expect_report "reports the controller policy" "UEFI controller policy: none"
+expect_report "reports the controller policy" "UEFI controller policy: xpad"
 case "$REPORT_OUTPUT" in
 	*DO-NOT-LEAK*) printf 'FAIL report leaked product_serial\n'; fail=1 ;;
 	*) printf 'ok   report excludes product_serial\n' ;;

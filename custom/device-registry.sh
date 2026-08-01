@@ -11,14 +11,14 @@ product|contains|ROG Xbox Ally X|ROG Xbox Ally X|1920x1080|xpad|ASUSTEK
 product|contains|ROG Xbox Ally|ROG Xbox Ally|1920x1080|xpad|ASUSTEK
 product|contains|ROG Ally X|ROG Ally X|1920x1080|xpad|ASUSTEK
 product|contains|ROG Ally|ROG Ally|1920x1080|xpad|ASUSTEK
-product|prefix|83N6|Legion Go S|1920x1200|none|LENOVO
+product|prefix|83N6|Legion Go S|1920x1200|xpad|LENOVO
 product|prefix|83L3|Legion Go S|1920x1200|xpad|LENOVO
 product|prefix|83Q2|Legion Go S|1920x1200|xpad|LENOVO
 product|prefix|83Q3|Legion Go S|1920x1200|xpad|LENOVO
 product|prefix|83N0|Legion Go 2|1920x1200|xpad|LENOVO
 product|prefix|83N1|Legion Go 2|1920x1200|xpad|LENOVO
 product|prefix|83E1|Legion Go|2560x1600|xpad|LENOVO
-family|contains|Legion Go S|Legion Go S|1920x1200|none|LENOVO
+family|contains|Legion Go S|Legion Go S|1920x1200|xpad|LENOVO
 family|contains|Legion Go 2|Legion Go 2|1920x1200|xpad|LENOVO
 product|contains|Claw 8 AI+|MSI Claw 8 AI+|1920x1200|ask|MICRO-STAR
 product|contains|Claw 8 AI+|MSI Claw 8 AI+|1920x1200|ask|MSI
