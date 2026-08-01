@@ -77,22 +77,15 @@ else
 	efibootmgr -c -d /dev/nvme0n1 -p 1 -L "$OS" -l "$EFI_NAME" &> /dev/null
 fi
 
-# check if Windows EFI needs to be disabled!
-if [ -e $EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig ]
+# verify/refresh the restorable Windows loader before disabling its canonical path
+CLOVER_CTL=/etc/clover-dualboot/clover-ctl
+if [ -x "$CLOVER_CTL" ] \
+	&& CLOVER_EFI_PATH="$EFI_PATH" "$CLOVER_CTL" protect-windows-efi >> "$CloverStatus" 2>&1
 then
-	echo Windows EFI backup exists. Check if Windows EFI needs to be disabled. >> $CloverStatus
-	if [ -e $EFI_PATH/Microsoft/Boot/bootmgfw.efi ]
-	then
-		mv $EFI_PATH/Microsoft/Boot/bootmgfw.efi $EFI_PATH/Microsoft/bootmgfw.efi &> /dev/null
-		echo Windows EFI needs to be disabled - done. >> $CloverStatus
-	else
-		echo Windows EFI is already disabled - no action needed. >> $CloverStatus
-	fi
+	echo Windows EFI protection verified. >> "$CloverStatus"
 else
-	echo Windows EFI backup does not exist. >> $CloverStatus
-	cp $EFI_PATH/Microsoft/Boot/bootmgfw.efi $EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig &> /dev/null
-	mv $EFI_PATH/Microsoft/Boot/bootmgfw.efi $EFI_PATH/Microsoft/bootmgfw.efi &> /dev/null
-	echo Windows EFI needs to be disabled - done. >> $CloverStatus
+	echo Windows EFI protection failed - refusing to move the loader. >> "$CloverStatus"
+	exit 1
 fi
 
 # re-arrange the boot order and make Clover the priority!
