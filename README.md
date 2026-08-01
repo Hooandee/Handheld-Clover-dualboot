@@ -12,7 +12,7 @@ Este proyecto parte del trabajo original de ryanrudolf, [SteamDeck-Clover-dualbo
 * **Instalador de temas**, integrado en la app: descarga temas desde CloverThemes, protege el tema activo y controla el espacio de la partición EFI.
 * **Clover Toolbox**, conservado como interfaz clásica de compatibilidad.
 * **Servicio de arranque** que revisa el dual boot en cada inicio y repara solo las entradas si se rompen.
-* **Controlador UEFI del mando XBOX 360** por [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) y [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe), para que el mando integrado de las portátiles que no son Steam Deck funcione dentro del menú de Clover.
+* **Controlador UEFI del mando XBOX 360** por [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) y [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe), activado únicamente en los modelos con compatibilidad conocida.
 * **Tema Eclipse** de [chris1111](https://github.com/chris1111/).
 
 ## Dispositivos compatibles

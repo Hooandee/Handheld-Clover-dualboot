@@ -47,6 +47,9 @@ check "" "ROG Xbox Ally X RC73XA" "" ASUSTeK \
 check "" "Claw 8 AI+ A2VM" "" MSI     "MSI Claw 8 AI+|1920x1200|ask"
 check "" "ONEXPLAYER 2 PRO ARP23P" "" ONE-NETBOOK \
 	"OneXPlayer 2 Pro|2560x1600|xpad"
+check "" 83L30030US "" ACME ""
+check "" "Prototype ROG Ally X clone" "" ACME ""
+check "" UnknownSku "Legion Go 2 Prototype" ACME ""
 check WeirdBoard WeirdProduct "" Unknown ""
 
 DETECTION_HELPER="$DIR/custom/device-detection.sh"
@@ -169,6 +172,37 @@ case "$REPORT_OUTPUT" in
 	*) printf 'ok   report excludes product_serial\n' ;;
 esac
 rm -rf "$REPORT_FIXTURE"
+
+DRIVER_MANAGER="$DIR/custom/manage-controller-driver.sh"
+if [ -f "$DRIVER_MANAGER" ]
+then
+	DRIVER_FIXTURE=$(mktemp -d)
+	mkdir -p "$DRIVER_FIXTURE/drivers"
+	printf '%s\n' stale-driver > "$DRIVER_FIXTURE/drivers/UsbXbox360Dxe.efi"
+	bash "$DRIVER_MANAGER" remove "$DRIVER_FIXTURE/drivers" > /dev/null 2>&1
+	if [ ! -e "$DRIVER_FIXTURE/drivers/UsbXbox360Dxe.efi" ]
+	then
+		printf 'ok   safe policy removes a stale controller driver\n'
+	else
+		printf 'FAIL safe policy retained a stale controller driver\n'
+		fail=1
+	fi
+
+	printf '%s\n' verified-driver > "$DRIVER_FIXTURE/source.efi"
+	bash "$DRIVER_MANAGER" install "$DRIVER_FIXTURE/source.efi" \
+		"$DRIVER_FIXTURE/drivers" > /dev/null 2>&1
+	if cmp -s "$DRIVER_FIXTURE/source.efi" "$DRIVER_FIXTURE/drivers/UsbXbox360Dxe.efi"
+	then
+		printf 'ok   compatible policy installs the controller driver\n'
+	else
+		printf 'FAIL compatible policy did not install the controller driver\n'
+		fail=1
+	fi
+	rm -rf "$DRIVER_FIXTURE"
+else
+	printf 'FAIL controller driver manager is missing\n'
+	fail=1
+fi
 
 echo "---"
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

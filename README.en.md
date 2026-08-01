@@ -12,7 +12,7 @@ This project is based on the original work by ryanrudolf, [SteamDeck-Clover-dual
 * **Theme installer**, built into the app: downloads from CloverThemes, protects the active theme and checks EFI partition space.
 * **Clover Toolbox**, retained as the classic compatibility interface.
 * **Boot-manager service** that checks the dual boot on every startup and auto-repairs broken boot entries.
-* **XBOX 360 controller UEFI driver** by [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) and [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe), so the built-in gamepad of non-Steam-Deck handhelds works inside the Clover menu.
+* **XBOX 360 controller UEFI driver** by [SkorionOS](https://github.com/SkorionOS/UsbXbox360Dxe) and [chenx-dust](https://github.com/chenx-dust/UsbXbox360Dxe), enabled only on models with known compatibility.
 * **Eclipse theme** by [chris1111](https://github.com/chris1111/).
 
 ## Supported devices

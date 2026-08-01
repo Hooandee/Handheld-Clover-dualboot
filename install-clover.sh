@@ -76,6 +76,7 @@ msg() {
 		installing_xpad) es='Instalando el driver UEFI del mando XBOX 360 para que el gamepad integrado funcione en Clover.'; en='Installing XBOX 360 controller UEFI driver so the built-in gamepad works in Clover.' ;;
 		xpad_ok) es='Driver UEFI de XBOX 360 instalado correctamente.'; en='Successfully installed XBOX 360 UEFI driver.' ;;
 		xpad_err) es='Error al instalar el driver UEFI de XBOX 360.'; en='Error installing XBOX 360 UEFI driver.' ;;
+		xpad_remove_err) es='No se pudo retirar un driver UEFI de XBOX 360 anterior.'; en='Could not remove a previous XBOX 360 UEFI driver.' ;;
 		xpad_not_needed) es='El driver UEFI de XBOX 360 no se instalará.'; en='The XBOX 360 UEFI driver will not be installed.' ;;
 		bootx64_orig_found) es='%s.orig encontrado - no se necesita acción.'; en='%s.orig found - no action needed.' ;;
 		bootx64_backup_missing) es='Copia de seguridad de %s no encontrada.'; en='%s backup not found.' ;;
@@ -361,12 +362,12 @@ echo -e "$current_password\n" | sudo -S cp custom/config.plist $EFI_PATH/clover/
 echo -e "$current_password\n" | sudo -S cp -Rf custom/themes/* $EFI_PATH/clover/themes
 echo -e "$current_password\n" | sudo -S rm -rf $EFI_PATH/clover/themes/{bgm,cesium,christmas,glass,purple_swirl,theme-sample.plist}
 
-# copy the XBOX 360 controller UEFI driver for every handheld except the Steam Deck
-# (the Steam Deck's built-in controller already works in Clover without it)
+# Reconcile the controller driver with the verified policy for this device.
 if [ "$XPAD_DRIVER" = "yes" ]
 then
 	msg installing_xpad
-	echo -e "$current_password\n" | sudo -S cp custom/UsbXbox360Dxe.efi $EFI_PATH/clover/drivers/uefi
+	echo -e "$current_password\n" | sudo -S bash custom/manage-controller-driver.sh install \
+		custom/UsbXbox360Dxe.efi "$EFI_PATH/clover/drivers/uefi"
 	if [ $? -eq 0 ]
 	then
 		msg xpad_ok
@@ -375,6 +376,12 @@ then
 		exit
 	fi
 else
+	if ! echo -e "$current_password\n" | sudo -S bash custom/manage-controller-driver.sh remove \
+		"$EFI_PATH/clover/drivers/uefi"
+	then
+		msg xpad_remove_err
+		exit
+	fi
 	msg xpad_not_needed
 fi
 
