@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import importlib.util
 import os
 import subprocess
 import tempfile
@@ -11,6 +12,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 DISCOVERY = REPO / "custom" / "boot-discovery.py"
 ESP_PARTTYPE = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+
+SPEC = importlib.util.spec_from_file_location("boot_discovery", DISCOVERY)
+BOOT_DISCOVERY = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(BOOT_DISCOVERY)
 
 
 def esp_partition(path, parent, partition, mountpoints, partuuid=None):
@@ -451,7 +456,38 @@ class BootDiscoveryTests(unittest.TestCase):
             },
         )
 
+        self.assertIsNotNone(layout["windows"])
         self.assertEqual(layout["windows"]["device"], "/dev/nvme0n1p1")
+        self.assertEqual(layout["windows"]["state"], "protected")
+
+    def test_live_scan_keeps_protected_windows_backup_in_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            esp = Path(tmp) / "esp"
+            files = (
+                esp / "EFI" / "steamos" / "steamcl.efi",
+                esp / "EFI" / "Microsoft" / "Boot" / "bootmgfw.efi.orig",
+                esp / "EFI" / "Microsoft" / "bootmgfw.efi",
+            )
+            for path in files:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"loader")
+            device = esp_partition(
+                "/dev/nvme0n1p1",
+                "nvme0n1",
+                1,
+                [str(esp)],
+                "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            )
+            lsblk = {"blockdevices": [device]}
+            inventory = BOOT_DISCOVERY.scan_mounted_efi_files(lsblk)
+            layout = BOOT_DISCOVERY.discover(
+                'ID=steamos\nPRETTY_NAME="SteamOS"\n',
+                lsblk,
+                inventory,
+                "",
+            )
+
+        self.assertIsNotNone(layout["windows"])
         self.assertEqual(layout["windows"]["state"], "protected")
 
     def test_live_mode_temporarily_mounts_unmounted_esps_read_only(self):

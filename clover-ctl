@@ -24,6 +24,7 @@ then
 fi
 REPORTER=${CLOVER_REPORTER:-}
 GENERIC_CONSENT=${CLOVER_GENERIC_CONSENT:-/etc/clover-dualboot/allow-generic}
+STATUS_CACHE=${CLOVER_STATUS_CACHE:-/var/lib/clover-dualboot/status.json}
 if [ -z "$REPORTER" ]
 then
 	for candidate in "$CTL_DIR/support_report.py" "$CTL_DIR/custom/support_report.py"
@@ -120,6 +121,8 @@ CONFIG=${CLOVER_CONFIG:-${EFI_PATH:+$EFI_PATH/clover/config.plist}}
 TEMP_WINDOWS_MOUNT=""
 PENDING_CREATED_BOOT_ID=""
 PENDING_ORIGINAL_BOOT_ORDER=""
+PENDING_ORIGINAL_BOOT_NEXT=""
+PENDING_BOOT_NEXT_CHANGED=no
 
 die() { echo "clover-ctl: $1" >&2; exit 1; }
 need_efi() { [ -n "$EFI_PATH" ] || die "could not resolve the mounted Clover EFI partition"; }
@@ -194,15 +197,25 @@ release_lock() {
 }
 
 rollback_boot_repair() {
-	local rollback_order=${1:-} rollback_id=${2:-}
+	local rollback_order=${1:-} rollback_id=${2:-} rollback_next=${3:-} restore_next=${4:-no}
+	if [ "$restore_next" = yes ]
+	then
+		case "$rollback_next" in
+			????) efibootmgr -n "$rollback_next" > /dev/null 2>&1 || true ;;
+			*) efibootmgr -N > /dev/null 2>&1 || true ;;
+		esac
+	fi
 	[ -z "$rollback_order" ] || efibootmgr -o "$rollback_order" > /dev/null 2>&1 || true
 	[ -z "$rollback_id" ] || efibootmgr -b "$rollback_id" -B > /dev/null 2>&1 || true
 	PENDING_ORIGINAL_BOOT_ORDER=""
 	PENDING_CREATED_BOOT_ID=""
+	PENDING_ORIGINAL_BOOT_NEXT=""
+	PENDING_BOOT_NEXT_CHANGED=no
 }
 
 cleanup_on_exit() {
-	rollback_boot_repair "$PENDING_ORIGINAL_BOOT_ORDER" "$PENDING_CREATED_BOOT_ID"
+	rollback_boot_repair "$PENDING_ORIGINAL_BOOT_ORDER" "$PENDING_CREATED_BOOT_ID" \
+		"$PENDING_ORIGINAL_BOOT_NEXT" "$PENDING_BOOT_NEXT_CHANGED"
 	release_lock
 	if [ -n "$TEMP_WINDOWS_MOUNT" ]
 	then
@@ -302,6 +315,23 @@ report_user_home() {
 	printf '%s|%s\n' "$user" "$home"
 }
 
+publish_status_cache() {
+	if [ "$(id -u)" != 0 ] \
+		&& { [ "${CLOVER_CTL_ALLOW_NONROOT:-}" != 1 ] || [ -z "${CLOVER_STATUS_CACHE:-}" ]; }
+	then
+		return 0
+	fi
+	cache_dir=$(dirname "$STATUS_CACHE")
+	cache_tmp="$STATUS_CACHE.tmp.$$"
+	mkdir -p "$cache_dir" \
+		&& CLOVER_BYPASS_STATUS_CACHE=1 bash "$0" status > "$cache_tmp" \
+		&& chmod 644 "$cache_tmp" \
+		&& mv -f "$cache_tmp" "$STATUS_CACHE" \
+		&& return 0
+	rm -f "$cache_tmp"
+	return 1
+}
+
 layout_shell_vars() {
 	python3 -c '
 import json, shlex, sys
@@ -364,6 +394,11 @@ boot_ids_from_text() {
 	awk '/^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/ { id=substr($1,5,4); sub(/\*/, "", id); printf "%s%s", sep, toupper(id); sep="," } END { print "" }'
 }
 
+current_boot_next() {
+	next_id=$(efibootmgr 2> /dev/null | awk '/^BootNext:/ { print toupper($2); exit }')
+	case "$next_id" in ???? ) printf '%s\n' "$next_id" ;; esac
+}
+
 csv_difference() {
 	new_values=$1
 	old_values=$2
@@ -394,9 +429,11 @@ repair_boot_priority() {
 	case "$LAYOUT_CLOVER_IDS" in *,*) die "multiple Clover firmware entries found; refusing to guess" ;; esac
 
 	original_order=$LAYOUT_BOOT_ORDER
+	original_next=$(current_boot_next)
 	created_id=""
 	lock=${CLOVER_OPERATION_LOCK:-/run/clover-dualboot-operation.lock}
 	acquire_lock "$lock"
+	PENDING_ORIGINAL_BOOT_ORDER=$original_order
 
 	if [ -z "$LAYOUT_CLOVER_IDS" ]
 	then
@@ -410,7 +447,6 @@ repair_boot_priority() {
 			????)
 				created_id=$new_ids
 				PENDING_CREATED_BOOT_ID=$created_id
-				PENDING_ORIGINAL_BOOT_ORDER=$original_order
 				;;
 			*) release_lock; die "could not identify the newly created Clover boot entry" ;;
 		esac
@@ -445,9 +481,18 @@ repair_boot_priority() {
 		release_lock
 		die "firmware did not retain the Clover-first boot order; rolled back"
 	fi
+	PENDING_ORIGINAL_BOOT_NEXT=$original_next
+	PENDING_BOOT_NEXT_CHANGED=yes
+	if ! efibootmgr -n "$clover_id" > /dev/null 2>&1 \
+		|| [ "$(current_boot_next)" != "$clover_id" ]
+	then
+		rollback_boot_repair "$original_order" "$created_id" "$original_next" yes
+		release_lock
+		die "firmware rejected Clover as the verified next boot; rolled back"
+	fi
 	rollback_boot_repair
 	release_lock
-	echo "Clover boot priority repaired and verified"
+	echo "Clover boot priority and next boot repaired and verified"
 }
 
 verified_publish() {
@@ -684,6 +729,12 @@ shift 2> /dev/null || true
 
 case "$CMD" in
 status)
+	if [ "$(id -u)" != 0 ] && [ "${CLOVER_BYPASS_STATUS_CACHE:-}" != 1 ] \
+		&& [ -r "$STATUS_CACHE" ]
+	then
+		cat "$STATUS_CACHE"
+		exit 0
+	fi
 	if [ -n "$CONFIG" ] && [ -f "$CONFIG" ]; then installed=yes; else installed=no; fi
 	if systemctl is-enabled clover-bootmanager &> /dev/null; then service=enabled
 	elif systemctl list-unit-files clover-bootmanager.service &> /dev/null; then service=disabled
@@ -1163,7 +1214,7 @@ clover-ctl <command> [args]
   restore-windows-efi                              (root) restore Windows from its verified EFI backup
   install-clover-loader <source>                   (root) verify backup and atomically publish Clover as BOOTX64
   restore-clover-loader <source>                   (root) restore the original BOOTX64 state after verifying Clover
-  repair-boot-priority [--allow-generic]           (root) register Clover and preserve the complete Clover-first BootOrder
+  repair-boot-priority [--allow-generic]           (root) register Clover, preserve BootOrder and arm the verified next boot
   install-decky                                     (root) install/update the Decky (Game Mode) plugin
   diagnostics                                       (root) write a bug-report bundle to your home folder
   set-batocera <v38|v39>                            (root) point the Batocera entry at the right loader
@@ -1178,3 +1229,14 @@ USAGE
 	die "unknown command: $CMD (try: clover-ctl help)"
 	;;
 esac
+
+command_result=$?
+if [ "$command_result" -eq 0 ]
+then
+	case "$CMD" in
+		set-*|reset-logo|service|protect-windows-efi|restore-windows-efi|install-clover-loader|restore-clover-loader|repair-boot-priority|install-theme|remove-theme)
+			publish_status_cache || true
+			;;
+	esac
+fi
+exit "$command_result"

@@ -290,7 +290,9 @@ def scan_mounted_efi_files(lsblk):
                 for path in efi_root.rglob("*"):
                     if len(found) >= 512:
                         break
-                    if path.is_file() and path.suffix.casefold() == ".efi":
+                    if path.is_file() and path.name.casefold().endswith(
+                        (".efi", ".efi.orig")
+                    ):
                         found.append(path.relative_to(root).as_posix())
             except OSError:
                 continue

@@ -108,10 +108,26 @@ expect "maintenance log is available to the graphical frontends" \
 	"fictional maintenance result"
 rm -f "$MAINTENANCE_LOG"
 
+STATUS_CACHE=$(mktemp)
+printf '%s\n' '{"cached":true,"layout_safe":true}' > "$STATUS_CACHE"
+cached_status=$(env -u CLOVER_EFI_PATH -u CLOVER_CONFIG \
+	CLOVER_STATUS_CACHE="$STATUS_CACHE" bash "$CTL" status)
+expect "unprivileged status uses the service cache when the ESP is private" \
+	"$cached_status" '{"cached":true,"layout_safe":true}'
+rm -f "$STATUS_CACHE"
+
+STATUS_CACHE=$(mktemp)
+rm -f "$STATUS_CACHE"
+CLOVER_STATUS_CACHE="$STATUS_CACHE" bash "$CTL" set-resolution 1600x900 > /dev/null
+cached_resolution=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["resolution"])' "$STATUS_CACHE" 2> /dev/null)
+expect "privileged settings refresh the graphical status cache" \
+	"$cached_resolution" "1600x900"
+rm -f "$STATUS_CACHE"
+
 # status emits parseable-looking JSON carrying the current values
 status=$(bash "$CTL" status)
 case "$status" in
-	*'"resolution":"1920x1080"'*'"theme":"Catalina"'*) expect "status JSON reflects writes" yes yes ;;
+	*'"resolution":"1600x900"'*'"theme":"Catalina"'*) expect "status JSON reflects writes" yes yes ;;
 	*) expect "status JSON reflects writes" "$status" "<json with resolution+theme>" ;;
 esac
 
@@ -274,6 +290,15 @@ case "${1:-}" in
 		sed "s/^BootOrder:.*/BootOrder: $2/" "$CLOVER_EFIBOOT_STATE" > "$CLOVER_EFIBOOT_STATE.tmp"
 		mv "$CLOVER_EFIBOOT_STATE.tmp" "$CLOVER_EFIBOOT_STATE"
 		;;
+	-n)
+		if [ "${CLOVER_EFIBOOT_REJECT_NEXT:-}" = 1 ] && [ "$2" = 0009 ]; then exit 1; fi
+		sed '/^BootNext:/d' "$CLOVER_EFIBOOT_STATE" > "$CLOVER_EFIBOOT_STATE.tmp"
+		{ printf 'BootNext: %s\n' "$2"; cat "$CLOVER_EFIBOOT_STATE.tmp"; } > "$CLOVER_EFIBOOT_STATE"
+		;;
+	-N)
+		sed '/^BootNext:/d' "$CLOVER_EFIBOOT_STATE" > "$CLOVER_EFIBOOT_STATE.tmp"
+		mv "$CLOVER_EFIBOOT_STATE.tmp" "$CLOVER_EFIBOOT_STATE"
+		;;
 	-b)
 		sed "/^Boot$2/d" "$CLOVER_EFIBOOT_STATE" > "$CLOVER_EFIBOOT_STATE.tmp"
 		mv "$CLOVER_EFIBOOT_STATE.tmp" "$CLOVER_EFIBOOT_STATE"
@@ -294,6 +319,8 @@ CLOVER_EFIBOOT_CALLS="$BOOT_CALLS" \
 PATH="$BOOT_BIN:$PATH" bash "$CTL" repair-boot-priority > /dev/null 2>&1
 expect "fallback-only Clover priority repair succeeds" "$?" "0"
 expect "repair preserves the full BootOrder" "$(sed -n 's/^BootOrder: //p' "$BOOT_STATE")" "0009,0002,0001,0007"
+expect "repair arms the exact Clover entry for firmware that ignores BootOrder" \
+	"$(sed -n 's/^BootNext: //p' "$BOOT_STATE")" "0009"
 case "$(cat "$BOOT_CALLS")" in
 	*'-c -d /dev/sda -p 2'*'-l \EFI\clover\cloverx64.efi'*) expect "repair uses discovered disk and partition" yes yes ;;
 	*) expect "repair uses discovered disk and partition" "$(cat "$BOOT_CALLS")" "efibootmgr create on /dev/sda partition 2" ;;
@@ -314,6 +341,27 @@ CLOVER_EFIBOOT_SCRAMBLE_CREATE=1 \
 PATH="$BOOT_BIN:$PATH" bash "$CTL" repair-boot-priority > /dev/null 2>&1
 expect "repair survives firmware reordering during entry creation" "$?" "0"
 expect "repair restores original relative order after firmware scrambling" "$(sed -n 's/^BootOrder: //p' "$BOOT_STATE")" "0009,0002,0001,0007"
+
+printf '%s\n' \
+	'BootNext: 0007' \
+	'BootOrder: 0002,0001,0007' \
+	'Boot0001* Windows Boot Manager	HD(1,GPT,bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb,0x800,0x100000)/\EFI\Microsoft\Boot\bootmgfw.efi' \
+	'Boot0002* SteamOS	HD(2,GPT,aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa,0x800,0x100000)/\EFI\steamos\steamcl.efi' \
+	'Boot0007* UEFI Network	PciRoot(0x0)/Pci(0x1f,0x6)' > "$BOOT_STATE"
+: > "$BOOT_CALLS"
+CLOVER_OS_RELEASE_PATH="$BOOT_TEST/os-release" \
+CLOVER_DISCOVERY="$DIR/custom/boot-discovery.py" \
+CLOVER_OPERATION_LOCK="$BOOT_TEST/operation.lock" \
+CLOVER_EFIBOOT_STATE="$BOOT_STATE" CLOVER_EFIBOOT_CALLS="$BOOT_CALLS" \
+CLOVER_EFIBOOT_REJECT_NEXT=1 PATH="$BOOT_BIN:$PATH" \
+	bash "$CTL" repair-boot-priority > /dev/null 2>&1
+expect "repair fails if firmware rejects Clover as BootNext" "$?" "1"
+expect "failed BootNext repair restores the original BootOrder" \
+	"$(sed -n 's/^BootOrder: //p' "$BOOT_STATE")" "0002,0001,0007"
+expect "failed BootNext repair preserves an existing one-shot choice" \
+	"$(sed -n 's/^BootNext: //p' "$BOOT_STATE")" "0007"
+expect "failed BootNext repair deletes its uncommitted Clover entry" \
+	"$(grep -c '^Boot0009' "$BOOT_STATE")" "0"
 
 printf '%s\n' \
 	'BootOrder: 0002,0001,0007' \
