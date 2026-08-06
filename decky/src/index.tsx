@@ -18,12 +18,28 @@ interface Status {
   default_os?: string;
   service?: string;
   windows_active?: boolean;
+  loader_kind?: string;
+  clover_status?: string;
+  clover_first?: boolean;
+  repair_needed?: boolean;
+  layout_safe?: boolean;
+  layout_requires_confirmation?: boolean;
+  layout_problems?: string[];
+  available_os?: Array<{
+    id: string;
+    label: string;
+    loader?: string;
+    validated?: boolean;
+  }>;
   error?: string;
 }
 
 const getStatus = callable<[], Status>("get_status");
+const getMaintenanceLog = callable<[], { ok: boolean; message: string }>("get_maintenance_log");
 const listThemes = callable<[], string[]>("list_themes");
 const setDefaultOs = callable<[string], { ok: boolean; message: string }>("set_default_os");
+const setDefaultLoader = callable<[string], { ok: boolean; message: string }>("set_default_loader");
+const repairBootPriority = callable<[boolean], { ok: boolean; message: string }>("repair_boot_priority");
 const setResolution = callable<[string], { ok: boolean; message: string }>("set_resolution");
 const setTheme = callable<[string], { ok: boolean; message: string }>("set_theme");
 const setTimeoutSecs = callable<[number], { ok: boolean; message: string }>("set_timeout");
@@ -45,6 +61,15 @@ const STRINGS: Record<string, Record<string, string>> = {
     boot_control: "Control de arranque",
     boot_windows: "Arrancar en Windows la próxima vez",
     reenable: "Reactivar Clover",
+    loader: "Cargador Linux",
+    clover_state: "Estado de Clover",
+    clover_first: "Clover primero",
+    repair: "Reparar prioridad de arranque",
+    problems: "Problemas detectados",
+    result: "Resultado",
+    latest_log: "Último registro",
+    view_log: "Ver último registro",
+    unvalidated: "no validado",
     lastused: "Última usada",
     autodetect: "Detección automática",
   },
@@ -61,6 +86,15 @@ const STRINGS: Record<string, Record<string, string>> = {
     boot_control: "Boot control",
     boot_windows: "Boot to Windows next",
     reenable: "Re-enable Clover",
+    loader: "Linux loader",
+    clover_state: "Clover state",
+    clover_first: "Clover first",
+    repair: "Repair boot priority",
+    problems: "Detected problems",
+    result: "Result",
+    latest_log: "Latest log",
+    view_log: "View latest log",
+    unvalidated: "unvalidated",
     lastused: "Last used",
     autodetect: "Auto-detect",
   },
@@ -70,11 +104,19 @@ function Content() {
   const [status, setStatus] = useState<Status | null>(null);
   const [themes, setThemes] = useState<string[]>([]);
   const [lang, setLangState] = useState<string>("es");
+  const [actionMessage, setActionMessage] = useState<string>("");
+  const [maintenanceLog, setMaintenanceLog] = useState<string>("");
 
   const t = (key: string) => (STRINGS[lang] ?? STRINGS.en)[key] ?? STRINGS.en[key] ?? key;
 
   const refresh = async () => {
     setStatus(await getStatus());
+  };
+
+  const applyAction = async (action: Promise<{ ok: boolean; message: string }>) => {
+    const result = await action;
+    setActionMessage(`${result.ok ? "✓" : "⚠"} ${result.message}`);
+    await refresh();
   };
 
   useEffect(() => {
@@ -87,12 +129,19 @@ function Content() {
     { data: "es", label: "Español" },
     { data: "en", label: "English" },
   ];
-  const osOptions = [
-    { data: "windows", label: "Windows" },
-    { data: "steamos", label: "SteamOS" },
-    { data: "bazzite", label: "Bazzite" },
-    { data: "lastos", label: t("lastused") },
+  const availableOs = status?.available_os ?? [
+    { id: "windows", label: "Windows" },
+    { id: "steamos", label: "SteamOS" },
+    { id: "bazzite", label: "Bazzite" },
+    { id: "lastos", label: t("lastused") },
   ];
+  const osOptions = availableOs.map((entry) => ({
+    data: entry.id,
+    label:
+      entry.id === "lastos"
+        ? t("lastused")
+        : `${entry.label}${entry.validated === false ? ` (${t("unvalidated")})` : ""}`,
+  }));
   const resOptions = ["auto", "1280x800", "1920x1080", "1920x1200", "2560x1600"].map((r) => ({
     data: r,
     label: r === "auto" ? t("autodetect") : r,
@@ -107,8 +156,8 @@ function Content() {
             rgOptions={langOptions}
             selectedOption={lang}
             onChange={async (o) => {
-              await setLang(o.data);
-              setLangState(o.data);
+              const result = await setLang(o.data);
+              if (result.ok) setLangState(o.data);
             }}
           />
         </PanelSectionRow>
@@ -127,6 +176,25 @@ function Content() {
         <PanelSectionRow>
           <Field label={t("service")}>{status?.service ?? "..."}</Field>
         </PanelSectionRow>
+        <PanelSectionRow>
+          <Field label={t("loader")}>{status?.loader_kind ?? "..."}</Field>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <Field label={t("clover_state")}>{status?.clover_status ?? "..."}</Field>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <Field label={t("clover_first")}>{status?.clover_first === true ? "✓" : "—"}</Field>
+        </PanelSectionRow>
+        {(status?.layout_problems?.length ?? 0) > 0 && (
+          <PanelSectionRow>
+            <Field label={t("problems")}>{status?.layout_problems?.join(", ")}</Field>
+          </PanelSectionRow>
+        )}
+        {(status?.error || actionMessage) && (
+          <PanelSectionRow>
+            <Field label={t("result")}>{status?.error || actionMessage}</Field>
+          </PanelSectionRow>
+        )}
       </PanelSection>
 
       <PanelSection title={t("default_boot_os")}>
@@ -135,8 +203,12 @@ function Content() {
             rgOptions={osOptions}
             selectedOption={status?.default_os}
             onChange={async (o) => {
-              await setDefaultOs(o.data);
-              refresh();
+              const selected = availableOs.find((entry) => entry.id === o.data);
+              if (selected?.loader) {
+                await applyAction(setDefaultLoader(selected.loader));
+              } else {
+                await applyAction(setDefaultOs(o.data));
+              }
             }}
           />
         </PanelSectionRow>
@@ -148,8 +220,7 @@ function Content() {
             rgOptions={resOptions}
             selectedOption={status?.resolution}
             onChange={async (o) => {
-              await setResolution(o.data);
-              refresh();
+              await applyAction(setResolution(o.data));
             }}
           />
         </PanelSectionRow>
@@ -161,8 +232,7 @@ function Content() {
             rgOptions={themes.map((th) => ({ data: th, label: th }))}
             selectedOption={status?.theme}
             onChange={async (o) => {
-              await setTheme(o.data);
-              refresh();
+              await applyAction(setTheme(o.data));
             }}
           />
         </PanelSectionRow>
@@ -174,8 +244,7 @@ function Content() {
             rgOptions={timeoutOptions}
             selectedOption={status?.timeout ? parseInt(status.timeout, 10) : undefined}
             onChange={async (o) => {
-              await setTimeoutSecs(o.data);
-              refresh();
+              await applyAction(setTimeoutSecs(o.data));
             }}
           />
         </PanelSectionRow>
@@ -185,9 +254,19 @@ function Content() {
         <PanelSectionRow>
           <ButtonItem
             layout="below"
+            disabled={!status?.repair_needed || !status?.layout_safe}
             onClick={async () => {
-              await setService("disable");
-              refresh();
+              await applyAction(repairBootPriority(status?.layout_requires_confirmation === true));
+            }}
+          >
+            {t("repair")}
+          </ButtonItem>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={async () => {
+              await applyAction(setService("disable"));
             }}
           >
             {t("boot_windows")}
@@ -197,13 +276,29 @@ function Content() {
           <ButtonItem
             layout="below"
             onClick={async () => {
-              await setService("enable");
-              refresh();
+              await applyAction(setService("enable"));
             }}
           >
             {t("reenable")}
           </ButtonItem>
         </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={async () => {
+              const result = await getMaintenanceLog();
+              setMaintenanceLog(result.message);
+              if (!result.ok) setActionMessage(`⚠ ${result.message}`);
+            }}
+          >
+            {t("view_log")}
+          </ButtonItem>
+        </PanelSectionRow>
+        {maintenanceLog && (
+          <PanelSectionRow>
+            <Field label={t("latest_log")}>{maintenanceLog}</Field>
+          </PanelSectionRow>
+        )}
       </PanelSection>
     </>
   );

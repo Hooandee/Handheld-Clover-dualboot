@@ -38,6 +38,10 @@ class Plugin:
         proc = subprocess.run([self.ctl, *args], capture_output=True, text=True)
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
 
+    def _action(self, args):
+        rc, out, err = self._run(args)
+        return {"ok": rc == 0, "message": out or err}
+
     async def get_status(self):
         rc, out, err = self._run(["status"])
         if rc != 0:
@@ -47,29 +51,36 @@ class Plugin:
         except json.JSONDecodeError:
             return {"error": "could not parse status"}
 
+    async def get_maintenance_log(self):
+        return self._action(["maintenance-log"])
+
     async def list_themes(self):
         rc, out, _ = self._run(["list-themes"])
         return out.splitlines() if rc == 0 and out else []
 
     async def set_default_os(self, os_name):
-        rc, out, err = self._run(["set-default-os", os_name])
-        return {"ok": rc == 0, "message": out or err}
+        return self._action(["set-default-os", os_name])
+
+    async def set_default_loader(self, loader):
+        return self._action(["set-default-loader", loader])
+
+    async def repair_boot_priority(self, allow_generic=False):
+        args = ["repair-boot-priority"]
+        if allow_generic:
+            args.append("--allow-generic")
+        return self._action(args)
 
     async def set_resolution(self, value):
-        rc, out, err = self._run(["set-resolution", value])
-        return {"ok": rc == 0, "message": out or err}
+        return self._action(["set-resolution", value])
 
     async def set_theme(self, name):
-        rc, out, err = self._run(["set-theme", name])
-        return {"ok": rc == 0, "message": out or err}
+        return self._action(["set-theme", name])
 
     async def set_timeout(self, secs):
-        rc, out, err = self._run(["set-timeout", str(secs)])
-        return {"ok": rc == 0, "message": out or err}
+        return self._action(["set-timeout", str(secs)])
 
     async def set_service(self, action):
-        rc, out, err = self._run(["service", action])
-        return {"ok": rc == 0, "message": out or err}
+        return self._action(["service", action])
 
     async def get_lang(self):
         env = os.environ.get("CLOVER_LANG")

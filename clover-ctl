@@ -13,8 +13,88 @@ CTL_VERSION="1.1.0"
 # the ESP is tiny (~25MB free), so cap how many theme folders may live on it
 THEME_LIMIT=5
 CLOVERTHEMES_REPO=${CLOVERTHEMES_REPO:-CloverHackyColor/CloverThemes}
+CTL_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+DISCOVERY=${CLOVER_DISCOVERY:-}
+if [ -z "$DISCOVERY" ]
+then
+	for candidate in "$CTL_DIR/boot-discovery.py" "$CTL_DIR/custom/boot-discovery.py"
+	do
+		[ -f "$candidate" ] && { DISCOVERY=$candidate; break; }
+	done
+fi
+REPORTER=${CLOVER_REPORTER:-}
+GENERIC_CONSENT=${CLOVER_GENERIC_CONSENT:-/etc/clover-dualboot/allow-generic}
+if [ -z "$REPORTER" ]
+then
+	for candidate in "$CTL_DIR/support_report.py" "$CTL_DIR/custom/support_report.py"
+	do
+		[ -f "$candidate" ] && { REPORTER=$candidate; break; }
+	done
+fi
+
+efi_directory_at_mount() {
+	for candidate in "$1"/*
+	do
+		[ -d "$candidate" ] || continue
+		[ "$(basename "$candidate" | tr '[:upper:]' '[:lower:]')" = efi ] \
+			&& { printf '%s\n' "$candidate"; return 0; }
+	done
+	return 1
+}
+
+canonical_bootx64_path() {
+	local efi_root boot_dir="" existing="" candidate
+	efi_root=$1
+	for candidate in "$efi_root"/*
+	do
+		[ -d "$candidate" ] || continue
+		[ "$(basename "$candidate" | tr '[:upper:]' '[:lower:]')" = boot ] \
+			&& { boot_dir=$candidate; break; }
+	done
+	[ -z "$boot_dir" ] || existing=$(find "$boot_dir" -mindepth 1 -maxdepth 1 -type f -iname bootx64.efi 2> /dev/null | head -n1)
+	printf '%s\n' "${existing:-$efi_root/BOOT/BOOTX64.EFI}"
+}
 
 detect_os() {
+	OS=unknown
+	EFI_PATH=""
+	WINDOWS_EFI_PATH=""
+	BOOTX64=""
+	if [ -n "$DISCOVERY" ] && [ -f "$DISCOVERY" ]
+	then
+		layout=$(python3 "$DISCOVERY" 2> /dev/null) || layout=""
+		if [ -n "$layout" ]
+		then
+			vars=$(printf '%s' "$layout" | python3 -c '
+import json, shlex, sys
+d = json.load(sys.stdin)
+host = d.get("host_os") or {}
+target = d.get("clover_target") or {}
+windows = d.get("windows") or {}
+def emit(name, value): print(name + "=" + shlex.quote(str(value)))
+emit("DETECTED_OS", host.get("name", "unknown"))
+emit("DETECTED_TARGET_DEVICE", target.get("device", ""))
+emit("DETECTED_TARGET_MOUNT", next(iter(target.get("mountpoints") or []), ""))
+emit("DETECTED_WINDOWS_DEVICE", windows.get("device", ""))
+emit("DETECTED_WINDOWS_MOUNT", next(iter(windows.get("mountpoints") or []), ""))
+') || vars=""
+			if [ -n "$vars" ]
+			then
+				eval "$vars"
+				OS=$DETECTED_OS
+				[ -z "$DETECTED_TARGET_MOUNT" ] || EFI_PATH=$(efi_directory_at_mount "$DETECTED_TARGET_MOUNT") || EFI_PATH=""
+				[ -z "$EFI_PATH" ] || BOOTX64=$(canonical_bootx64_path "$EFI_PATH")
+				if [ -n "$DETECTED_WINDOWS_DEVICE" ] && [ "$DETECTED_WINDOWS_DEVICE" = "$DETECTED_TARGET_DEVICE" ]
+				then
+					WINDOWS_EFI_PATH=$EFI_PATH
+				elif [ -n "$DETECTED_WINDOWS_MOUNT" ]
+				then
+					WINDOWS_EFI_PATH=$(efi_directory_at_mount "$DETECTED_WINDOWS_MOUNT") || WINDOWS_EFI_PATH=""
+				fi
+				[ -n "$EFI_PATH" ] && return 0
+			fi
+		fi
+	fi
 	if grep -qi bazzite /etc/os-release 2> /dev/null
 	then
 		OS=bazzite; EFI_PATH=/boot/efi/EFI; BOOTX64=$EFI_PATH/BOOT/BOOTX64.EFI
@@ -24,15 +104,66 @@ detect_os() {
 	else
 		OS=unknown; EFI_PATH=; BOOTX64=
 	fi
+	WINDOWS_EFI_PATH=$EFI_PATH
 }
 detect_os
 # CLOVER_EFI_PATH lets the tests point the theme commands at a throwaway tree
-EFI_PATH=${CLOVER_EFI_PATH:-$EFI_PATH}
+if [ -n "${CLOVER_EFI_PATH:-}" ]
+then
+	EFI_PATH=$CLOVER_EFI_PATH
+	WINDOWS_EFI_PATH=${CLOVER_WINDOWS_EFI_PATH:-$EFI_PATH}
+else
+	WINDOWS_EFI_PATH=${CLOVER_WINDOWS_EFI_PATH:-$WINDOWS_EFI_PATH}
+fi
 BOOTX64=${CLOVER_BOOTX_PATH:-$BOOTX64}
 CONFIG=${CLOVER_CONFIG:-${EFI_PATH:+$EFI_PATH/clover/config.plist}}
+TEMP_WINDOWS_MOUNT=""
+PENDING_CREATED_BOOT_ID=""
+PENDING_ORIGINAL_BOOT_ORDER=""
 
 die() { echo "clover-ctl: $1" >&2; exit 1; }
-need_efi() { [ -n "$EFI_PATH" ] || die "not running on SteamOS or Bazzite"; }
+need_efi() { [ -n "$EFI_PATH" ] || die "could not resolve the mounted Clover EFI partition"; }
+discover_default_volume() {
+	target=$1
+	loader=${2:-}
+	fallback_volume() {
+		if [ "${CLOVER_REQUIRE_DISCOVERY:-}" != 1 ] \
+			&& { [ -n "${CLOVER_EFI_PATH:-}" ] || [ -n "${CLOVER_CONFIG:-}" ]; }
+		then
+			printf '%s\n' esp
+			return 0
+		fi
+		return 1
+	}
+	if [ -z "$DISCOVERY" ] || [ ! -f "$DISCOVERY" ]
+	then
+		fallback_volume
+		return $?
+	fi
+	if ! layout=$(python3 "$DISCOVERY" --mount-unmounted 2> /dev/null)
+	then
+		fallback_volume
+		return $?
+	fi
+	volume=$(printf '%s' "$layout" | python3 -c '
+import json, sys
+target, loader = sys.argv[1:]
+data = json.load(sys.stdin)
+record = data.get("windows") if target == "windows" else data.get("linux_loader")
+if not isinstance(record, dict):
+    raise SystemExit(3)
+if target == "linux" and str(record.get("path", "")).casefold() != loader.casefold():
+    raise SystemExit(3)
+value = str(record.get("partuuid", "")).upper()
+if not value:
+    raise SystemExit(3)
+print(value)
+' "$target" "$loader") || return 1
+	case "$volume" in
+		????????-????-????-????-????????????) printf '%s\n' "$volume" ;;
+		*) return 1 ;;
+	esac
+}
 valid_theme_name() {
 	case "$1" in ''|.|..|*/*) die "invalid theme name: $1" ;; esac
 	printf '%s\n' "$1" | LC_ALL=C grep -Eq '^[[:alnum:] _.-]+$' \
@@ -62,13 +193,261 @@ release_lock() {
 	LOCK_DIR=""
 }
 
+rollback_boot_repair() {
+	local rollback_order=${1:-} rollback_id=${2:-}
+	[ -z "$rollback_order" ] || efibootmgr -o "$rollback_order" > /dev/null 2>&1 || true
+	[ -z "$rollback_id" ] || efibootmgr -b "$rollback_id" -B > /dev/null 2>&1 || true
+	PENDING_ORIGINAL_BOOT_ORDER=""
+	PENDING_CREATED_BOOT_ID=""
+}
+
+cleanup_on_exit() {
+	rollback_boot_repair "$PENDING_ORIGINAL_BOOT_ORDER" "$PENDING_CREATED_BOOT_ID"
+	release_lock
+	if [ -n "$TEMP_WINDOWS_MOUNT" ]
+	then
+		umount "$TEMP_WINDOWS_MOUNT" 2> /dev/null || true
+		rmdir "$TEMP_WINDOWS_MOUNT" 2> /dev/null || true
+		TEMP_WINDOWS_MOUNT=""
+	fi
+}
+
+ensure_windows_efi_mounted() {
+	[ -n "$WINDOWS_EFI_PATH" ] && [ -d "$WINDOWS_EFI_PATH" ] && return 0
+	[ -n "$DISCOVERY" ] && [ -f "$DISCOVERY" ] || return 1
+	layout=$(python3 "$DISCOVERY" --mount-unmounted 2> /dev/null) || return 1
+	vars=$(printf '%s' "$layout" | python3 -c '
+import json, shlex, sys
+d = json.load(sys.stdin)
+w = d.get("windows") or {}
+def emit(name, value):
+    print(name + "=" + shlex.quote(str(value)))
+emit("WINDOWS_DEVICE_TO_MOUNT", w.get("device", ""))
+emit("WINDOWS_EXISTING_MOUNT", next(iter(w.get("mountpoints") or []), ""))
+') || return 1
+	eval "$vars"
+	if [ -n "$WINDOWS_EXISTING_MOUNT" ]
+	then
+		WINDOWS_EFI_PATH=$(efi_directory_at_mount "$WINDOWS_EXISTING_MOUNT") || return 1
+		return 0
+	fi
+	case "$WINDOWS_DEVICE_TO_MOUNT" in /dev/*) ;; *) return 1 ;; esac
+	if [ "${CLOVER_CTL_ALLOW_NONROOT:-}" != 1 ] && [ ! -b "$WINDOWS_DEVICE_TO_MOUNT" ]
+	then
+		return 1
+	fi
+	TEMP_WINDOWS_MOUNT=$(mktemp -d "${TMPDIR:-/tmp}/clover-windows.XXXXXX") || return 1
+	if ! mount -o rw,nosuid,nodev,noexec "$WINDOWS_DEVICE_TO_MOUNT" "$TEMP_WINDOWS_MOUNT"
+	then
+		rmdir "$TEMP_WINDOWS_MOUNT" 2> /dev/null || true
+		TEMP_WINDOWS_MOUNT=""
+		return 1
+	fi
+	trap cleanup_on_exit EXIT
+	trap 'exit 1' HUP INT TERM
+	WINDOWS_EFI_PATH=$(efi_directory_at_mount "$TEMP_WINDOWS_MOUNT") || return 1
+}
+
+windows_boot_entry_id() {
+	[ -n "$DISCOVERY" ] && [ -f "$DISCOVERY" ] || return 1
+	layout=$(python3 "$DISCOVERY" --mount-unmounted 2> /dev/null) || return 1
+	printf '%s' "$layout" | python3 -c '
+import json, re, sys
+d = json.load(sys.stdin)
+w = d.get("windows") or {}
+partuuid = str(w.get("partuuid", "")).casefold()
+matches = []
+for entry in (d.get("firmware") or {}).get("entries") or []:
+    path = str(entry.get("device_path", ""))
+    guid = re.search(r"GPT,([0-9A-Fa-f-]{36}),", path, re.IGNORECASE)
+    if (guid and partuuid and guid.group(1).casefold() == partuuid
+            and "\\efi\\microsoft\\boot\\bootmgfw.efi" in path.casefold()):
+        matches.append(str(entry.get("id", "")))
+if len(matches) != 1 or not re.fullmatch(r"[0-9A-Fa-f]{4}", matches[0]):
+    raise SystemExit(1)
+print(matches[0].upper())
+'
+}
+
 acquire_lock() {
 	wanted_lock=$1
 	mkdir "$wanted_lock" 2> /dev/null || die "another Clover operation is already running (remove stale lock only after confirming no Clover process is active: $wanted_lock)"
 	LOCK_DIR=$wanted_lock
 	printf '%s\n' "$$" > "$LOCK_DIR/pid" || { release_lock; die "could not record the Clover operation lock"; }
-	trap release_lock EXIT
+	trap cleanup_on_exit EXIT
 	trap 'exit 1' HUP INT TERM
+}
+
+discover_boot_layout() {
+	[ -n "$DISCOVERY" ] && [ -f "$DISCOVERY" ] \
+		|| die "boot discovery component not found"
+	python3 "$DISCOVERY" "$@"
+}
+
+need_reporter() {
+	[ -n "$REPORTER" ] && [ -f "$REPORTER" ] \
+		|| die "support report component not found"
+	[ -n "$DISCOVERY" ] && [ -f "$DISCOVERY" ] \
+		|| die "boot discovery component not found"
+}
+
+report_user_home() {
+	user=${SUDO_USER:-$(id -un 1000 2> /dev/null || echo "${USER:-deck}")}
+	home=""
+	if command -v getent > /dev/null 2>&1
+	then
+		home=$(getent passwd "$user" 2> /dev/null | cut -d: -f6)
+	fi
+	[ -n "$home" ] || home=${HOME:-/home/$user}
+	printf '%s|%s\n' "$user" "$home"
+}
+
+layout_shell_vars() {
+	python3 -c '
+import json, shlex, sys
+d = json.load(sys.stdin)
+def emit(name, value):
+    print(name + "=" + shlex.quote(str(value)))
+emit("LAYOUT_SAFE", "yes" if d.get("safe_to_write") else "no")
+emit("LAYOUT_DISK", (d.get("clover_target") or {}).get("disk", ""))
+emit("LAYOUT_PARTITION", (d.get("clover_target") or {}).get("partition", ""))
+emit("LAYOUT_CLOVER_IDS", ",".join((d.get("clover") or {}).get("entry_ids") or []))
+emit("LAYOUT_CLOVER_FIRST", "yes" if (d.get("clover") or {}).get("first_in_boot_order") else "no")
+emit("LAYOUT_BOOT_ORDER", ",".join((d.get("firmware") or {}).get("boot_order") or []))
+emit("LAYOUT_ENTRY_IDS", ",".join(entry.get("id", "") for entry in (d.get("firmware") or {}).get("entries") or []))
+emit("LAYOUT_PROBLEMS", ",".join(d.get("problems") or []))
+'
+}
+
+load_boot_layout() {
+	layout=$(discover_boot_layout "$@") || die "could not inspect the UEFI boot layout"
+	vars=$(printf '%s' "$layout" | layout_shell_vars) \
+		|| die "boot discovery returned invalid data"
+	eval "$vars"
+}
+
+order_contains_all() {
+	wanted=$1
+	actual=$2
+	old_ifs=$IFS
+	IFS=,
+	for entry in $wanted
+	do
+		case ",$actual," in *",$entry,"*) ;; *) IFS=$old_ifs; return 1 ;; esac
+	done
+	IFS=$old_ifs
+}
+
+clover_first_order() {
+	clover_id=$1
+	original=$2
+	current=$3
+	desired=$clover_id
+	base=$original
+	[ -n "$base" ] || base=$current
+	old_ifs=$IFS
+	IFS=,
+	for entry in $base
+	do
+		[ "$entry" = "$clover_id" ] && continue
+		desired="$desired,$entry"
+	done
+	for entry in $current
+	do
+		case ",$desired," in *",$entry,"*) ;; *) desired="$desired,$entry" ;; esac
+	done
+	IFS=$old_ifs
+	printf '%s\n' "$desired"
+}
+
+boot_ids_from_text() {
+	awk '/^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/ { id=substr($1,5,4); sub(/\*/, "", id); printf "%s%s", sep, toupper(id); sep="," } END { print "" }'
+}
+
+csv_difference() {
+	new_values=$1
+	old_values=$2
+	difference=""
+	old_ifs=$IFS
+	IFS=,
+	for value in $new_values
+	do
+		case ",$old_values," in *",$value,"*) continue ;; esac
+		[ -z "$difference" ] && difference=$value || difference="$difference,$value"
+	done
+	IFS=$old_ifs
+	printf '%s\n' "$difference"
+}
+
+repair_boot_priority() {
+	need_root
+	discovery_args=--mount-unmounted
+	if [ "${1:-}" = --allow-generic ] || [ -f "$GENERIC_CONSENT" ]
+	then
+		discovery_args="$discovery_args --allow-generic"
+	fi
+	load_boot_layout $discovery_args
+	[ "$LAYOUT_SAFE" = yes ] \
+		|| die "boot layout is ambiguous or incomplete: ${LAYOUT_PROBLEMS:-unknown}"
+	[ -n "$LAYOUT_DISK" ] && [ -n "$LAYOUT_PARTITION" ] \
+		|| die "Clover target disk or partition is missing"
+	case "$LAYOUT_CLOVER_IDS" in *,*) die "multiple Clover firmware entries found; refusing to guess" ;; esac
+
+	original_order=$LAYOUT_BOOT_ORDER
+	created_id=""
+	lock=${CLOVER_OPERATION_LOCK:-/run/clover-dualboot-operation.lock}
+	acquire_lock "$lock"
+
+	if [ -z "$LAYOUT_CLOVER_IDS" ]
+	then
+		pre_create_ids=$LAYOUT_ENTRY_IDS
+		create_output=$(efibootmgr -c -d "$LAYOUT_DISK" -p "$LAYOUT_PARTITION" \
+			-L "Clover - GUI Boot Manager" -l '\EFI\clover\cloverx64.efi' 2> /dev/null) \
+			|| { release_lock; die "firmware rejected the Clover boot entry"; }
+		post_create_ids=$(printf '%s\n' "$create_output" | boot_ids_from_text)
+		new_ids=$(csv_difference "$post_create_ids" "$pre_create_ids")
+		case "$new_ids" in
+			????)
+				created_id=$new_ids
+				PENDING_CREATED_BOOT_ID=$created_id
+				PENDING_ORIGINAL_BOOT_ORDER=$original_order
+				;;
+			*) release_lock; die "could not identify the newly created Clover boot entry" ;;
+		esac
+		load_boot_layout $discovery_args
+		case "$LAYOUT_CLOVER_IDS" in
+			"$created_id") ;;
+			*)
+				rollback_boot_repair "$original_order" "$created_id"
+				release_lock
+				die "could not verify the newly created Clover boot entry"
+				;;
+		esac
+	fi
+
+	clover_id=$LAYOUT_CLOVER_IDS
+	order_contains_all "$original_order" "$LAYOUT_BOOT_ORDER" || {
+		rollback_boot_repair "$original_order" "$created_id"
+		release_lock
+		die "firmware dropped an existing boot entry while registering Clover; rolled back"
+	}
+	desired_order=$(clover_first_order "$clover_id" "$original_order" "$LAYOUT_BOOT_ORDER")
+	if ! efibootmgr -o "$desired_order" > /dev/null 2>&1
+	then
+		rollback_boot_repair "$original_order" "$created_id"
+		release_lock
+		die "firmware rejected the complete Clover-first boot order; rolled back"
+	fi
+	load_boot_layout $discovery_args
+	if [ "$LAYOUT_BOOT_ORDER" != "$desired_order" ] || [ "$LAYOUT_CLOVER_FIRST" != yes ]
+	then
+		rollback_boot_repair "$original_order" "$created_id"
+		release_lock
+		die "firmware did not retain the Clover-first boot order; rolled back"
+	fi
+	rollback_boot_repair
+	release_lock
+	echo "Clover boot priority repaired and verified"
 }
 
 verified_publish() {
@@ -140,13 +519,14 @@ refresh_windows_backup() {
 
 protect_windows_efi() {
 	need_root; need_efi
-	win_boot="$EFI_PATH/Microsoft/Boot"
+	ensure_windows_efi_mounted || die "could not safely mount the unique Windows EFI partition"
+	win_boot="$WINDOWS_EFI_PATH/Microsoft/Boot"
 	active="$win_boot/bootmgfw.efi"
 	backup="$active.orig"
 	previous="$active.orig.prev"
-	disabled="$EFI_PATH/Microsoft/bootmgfw.efi"
+	disabled="$WINDOWS_EFI_PATH/Microsoft/bootmgfw.efi"
 	[ -d "$win_boot" ] || die "Windows EFI directory not found: $win_boot"
-	acquire_lock "$EFI_PATH/Microsoft/.clover-efi.lock"
+	acquire_lock "$WINDOWS_EFI_PATH/Microsoft/.clover-efi.lock"
 	if [ -e "$active" ]
 	then
 		refresh_windows_backup "$active" "$backup" "$previous" \
@@ -174,6 +554,20 @@ protect_windows_efi() {
 	echo "Windows EFI loader already disabled with a verified backup"
 }
 
+restore_windows_efi() {
+	need_root; need_efi
+	ensure_windows_efi_mounted || die "could not safely mount the unique Windows EFI partition"
+	win_boot="$WINDOWS_EFI_PATH/Microsoft/Boot"
+	active="$win_boot/bootmgfw.efi"
+	backup="$active.orig"
+	[ -s "$backup" ] || die "verified Windows EFI backup is missing"
+	acquire_lock "$WINDOWS_EFI_PATH/Microsoft/.clover-efi.lock"
+	verified_publish "$backup" "$active" \
+		|| die "could not restore and verify the Windows EFI loader"
+	release_lock
+	echo "Windows EFI loader restored"
+}
+
 install_clover_loader() {
 	need_root; need_efi
 	source_loader=$1
@@ -182,19 +576,62 @@ install_clover_loader() {
 	mkdir -p "$(dirname "$BOOTX64")" || die "could not create the BOOTX64 directory"
 	acquire_lock "$EFI_PATH/.clover-efi.lock"
 	backup="$BOOTX64.orig"
-	if [ ! -e "$backup" ]
+	no_original="$BOOTX64.clover-no-original"
+	if [ ! -e "$backup" ] && [ ! -e "$no_original" ]
 	then
-		[ -s "$BOOTX64" ] || die "original BOOTX64 loader is missing"
-		verified_publish "$BOOTX64" "$backup" || die "could not create a verified BOOTX64 backup"
+		if [ -e "$BOOTX64" ]
+		then
+			[ -s "$BOOTX64" ] || die "original BOOTX64 loader is empty"
+			verified_publish "$BOOTX64" "$backup" || die "could not create a verified BOOTX64 backup"
+		else
+			marker_stage="$no_original.$$"
+			printf '%s\n' "no original BOOTX64" > "$marker_stage" \
+				&& mv -f "$marker_stage" "$no_original" \
+				|| { rm -f "$marker_stage"; die "could not record the missing original BOOTX64 state"; }
+		fi
 	fi
-	[ -s "$backup" ] || die "verified BOOTX64 backup is empty or invalid: $backup"
+	[ -s "$backup" ] || [ -s "$no_original" ] \
+		|| die "BOOTX64 recovery state is empty or invalid"
 	verified_publish "$source_loader" "$BOOTX64" || {
-		verified_publish "$backup" "$BOOTX64" \
-			|| die "Clover loader publication and verified BOOTX64 rollback both failed; backup remains at $backup"
-		die "could not publish the Clover loader; original BOOTX64 was restored"
+		if [ -s "$backup" ]
+		then
+			verified_publish "$backup" "$BOOTX64" \
+				|| die "Clover loader publication and verified BOOTX64 rollback both failed; backup remains at $backup"
+			die "could not publish the Clover loader; original BOOTX64 was restored"
+		fi
+		rm -f "$BOOTX64" "$no_original"
+		die "could not publish the Clover loader; the originally absent BOOTX64 state was restored"
 	}
 	release_lock
 	echo "Clover loader installed at $BOOTX64"
+}
+
+restore_clover_loader() {
+	need_root; need_efi
+	source_loader=$1
+	[ -n "$BOOTX64" ] || die "canonical BOOTX64 path is unknown"
+	backup="$BOOTX64.orig"
+	no_original="$BOOTX64.clover-no-original"
+	acquire_lock "$EFI_PATH/.clover-efi.lock"
+	if [ -s "$backup" ]
+	then
+		verified_publish "$backup" "$BOOTX64" \
+			|| die "could not restore and verify the original BOOTX64 loader"
+		release_lock
+		echo "original BOOTX64 loader restored"
+		return 0
+	fi
+	if [ -s "$no_original" ]
+	then
+		[ -s "$source_loader" ] && [ -s "$BOOTX64" ] && cmp -s "$source_loader" "$BOOTX64" \
+			|| die "current BOOTX64 is not the verified Clover loader; refusing to delete it"
+		rm -f "$BOOTX64" "$no_original" \
+			|| die "could not restore the originally absent BOOTX64 state"
+		release_lock
+		echo "originally absent BOOTX64 state restored"
+		return 0
+	fi
+	die "BOOTX64 recovery state is missing"
 }
 
 # native panel resolution from the kernel, normalized to landscape (panels are often mounted rotated)
@@ -222,6 +659,7 @@ default_os_label() {
 		*microsoft*) echo windows ;;
 		*steamcl*) echo steamos ;;
 		*fedora*|*shimx64*) echo bazzite ;;
+		*limine*|*systemd-bootx64*|*cachyos*grubx64*|*refind*refind_x64*) echo cachyos ;;
 		*) echo unknown ;;
 	esac
 }
@@ -250,11 +688,65 @@ status)
 	if systemctl is-enabled clover-bootmanager &> /dev/null; then service=enabled
 	elif systemctl list-unit-files clover-bootmanager.service &> /dev/null; then service=disabled
 	else service=absent; fi
-	if [ -n "$EFI_PATH" ] && [ -e "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" ]; then winactive=yes; else winactive=no; fi
+	if [ -n "$WINDOWS_EFI_PATH" ] && [ -e "$WINDOWS_EFI_PATH/Microsoft/Boot/bootmgfw.efi" ]; then winactive=yes; else winactive=no; fi
 	IFS='|' read -r res theme timeout loader volume < <(plist_get_all "$CONFIG")
-	printf '{"os":"%s","installed":%s,"resolution":"%s","theme":"%s","timeout":"%s","default_os":"%s","service":"%s","windows_active":%s,"theme_limit":%d,"theme_count":%d}\n' \
+	base_status=$(printf '{"os":"%s","installed":%s,"resolution":"%s","theme":"%s","timeout":"%s","default_os":"%s","service":"%s","windows_active":%s,"theme_limit":%d,"theme_count":%d}' \
 		"$OS" "$(json_bool $installed)" "$res" "$theme" "$timeout" \
-		"$(default_os_label "$loader" "$volume")" "$service" "$(json_bool $winactive)" "$THEME_LIMIT" "$(theme_count)"
+		"$(default_os_label "$loader" "$volume")" "$service" "$(json_bool $winactive)" "$THEME_LIMIT" "$(theme_count)")
+		status_args=""
+		[ -f "$GENERIC_CONSENT" ] && status_args=--allow-generic
+		if layout_status=$(discover_boot_layout $status_args 2> /dev/null)
+	then
+		BASE_STATUS=$base_status LAYOUT_STATUS=$layout_status CONFIGURED_LOADER=$loader python3 -c '
+import json, os
+base = json.loads(os.environ["BASE_STATUS"])
+layout = json.loads(os.environ["LAYOUT_STATUS"])
+host = layout.get("host_os") or {}
+loader = layout.get("linux_loader") or {}
+target = layout.get("clover_target") or {}
+clover = layout.get("clover") or {}
+windows = layout.get("windows") or {}
+configured_loader = os.environ.get("CONFIGURED_LOADER", "")
+base.update({
+    "os": host.get("name", base.get("os")),
+    "boot_profile": host.get("profile", "unknown"),
+    "loader_kind": loader.get("kind", ""),
+    "loader_path": loader.get("path", ""),
+    "loader_validated": loader.get("validated", False),
+    "target_device": target.get("device", ""),
+    "target_disk": target.get("disk", ""),
+    "target_partition": target.get("partition", ""),
+    "windows_device": windows.get("device", ""),
+    "windows_active": windows.get("state") == "active" if windows else base.get("windows_active", False),
+    "clover_status": clover.get("status", "absent"),
+    "clover_first": clover.get("first_in_boot_order", False),
+    "repair_needed": clover.get("repair_needed", True),
+    "layout_safe": layout.get("safe_to_write", False),
+    "layout_requires_confirmation": layout.get("requires_confirmation", False),
+    "layout_problems": layout.get("problems") or [],
+})
+if loader and configured_loader.casefold() == str(loader.get("path", "")).casefold():
+    base["default_os"] = host.get("profile", "linux")
+available = []
+if windows:
+    available.append({"id": "windows", "label": "Windows"})
+if loader:
+    available.append({
+        "id": host.get("profile", "linux"),
+        "label": host.get("name", "Linux"),
+        "loader": loader.get("path", ""),
+        "validated": loader.get("validated", False),
+    })
+available.append({"id": "lastos", "label": "Last used"})
+base["available_os"] = available
+print(json.dumps(base, separators=(",", ":"), sort_keys=True))
+'
+	else
+		printf '%s\n' "$base_status"
+	fi
+	;;
+boot-layout)
+	discover_boot_layout "$@"
 	;;
 get)
 	case "${1:-}" in
@@ -405,27 +897,60 @@ set-timeout)
 set-default-os)
 	need_root
 	case "${1:-}" in
-		windows) plist_set_pair DefaultLoader string '\efi\microsoft\bootmgfw.efi' DefaultVolume string esp "$CONFIG" || die "could not update the Clover config" ;;
-		steamos) plist_set_pair DefaultLoader string '\efi\steamos\steamcl.efi' DefaultVolume string esp "$CONFIG" || die "could not update the Clover config" ;;
-		bazzite) plist_set_pair DefaultLoader string '\EFI\FEDORA\shimx64.efi' DefaultVolume string esp "$CONFIG" || die "could not update the Clover config" ;;
+		windows)
+			volume=$(discover_default_volume windows) \
+				|| die "could not identify the unique Windows EFI partition"
+			plist_set_pair DefaultLoader string '\efi\microsoft\bootmgfw.efi' DefaultVolume string "$volume" "$CONFIG" || die "could not update the Clover config"
+			;;
+		steamos)
+			loader='\efi\steamos\steamcl.efi'
+			volume=$(discover_default_volume linux "$loader") \
+				|| die "could not identify the SteamOS EFI partition"
+			plist_set_pair DefaultLoader string "$loader" DefaultVolume string "$volume" "$CONFIG" || die "could not update the Clover config"
+			;;
+		bazzite)
+			loader='\EFI\FEDORA\shimx64.efi'
+			volume=$(discover_default_volume linux "$loader") \
+				|| die "could not identify the Bazzite EFI partition"
+			plist_set_pair DefaultLoader string "$loader" DefaultVolume string "$volume" "$CONFIG" || die "could not update the Clover config"
+			;;
 		lastos) plist_set DefaultVolume string LastBootedVolume "$CONFIG" || die "could not update the Clover config" ;;
 		*) die "usage: clover-ctl set-default-os <windows|steamos|bazzite|lastos>" ;;
 	esac
 	echo "default boot set to $1"
 	;;
+set-default-loader)
+	need_root
+	loader=${1:-}
+	case "$loader" in
+		\\EFI\\*|\\efi\\*) ;;
+		*) die "loader must be an absolute EFI path" ;;
+	esac
+	case "$loader" in *..*|*/*|*$'\n'*) die "invalid EFI loader path" ;; esac
+	printf '%s' "$loader" | grep -Eqi '\.efi$' || die "EFI loader path must end in .efi"
+	volume=$(discover_default_volume linux "$loader") \
+		|| die "loader is not on the uniquely discovered Linux EFI partition"
+	plist_set_pair DefaultLoader string "$loader" DefaultVolume string "$volume" "$CONFIG" \
+		|| die "could not update the default EFI loader"
+	echo "default EFI loader set to $loader"
+	;;
 service)
 	need_root; need_efi
 	case "${1:-}" in
 		disable)
-			backup="$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig"
-			active="$EFI_PATH/Microsoft/Boot/bootmgfw.efi"
+			ensure_windows_efi_mounted || die "could not safely mount the unique Windows EFI partition"
+			backup="$WINDOWS_EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig"
+			active="$WINDOWS_EFI_PATH/Microsoft/Boot/bootmgfw.efi"
 			[ -f "$backup" ] || die "Windows EFI backup missing - refusing to disable Clover so Windows stays bootable"
-			acquire_lock "$EFI_PATH/Microsoft/.clover-efi.lock"
+			acquire_lock "$WINDOWS_EFI_PATH/Microsoft/.clover-efi.lock"
 			verified_publish "$backup" "$active" || die "could not restore and verify Windows EFI - leaving Clover enabled"
 			release_lock
-			win=$(efibootmgr | grep -i Windows | colrm 9 | colrm 1 4)
-			[ -n "$win" ] && efibootmgr -n "$win" &> /dev/null
-			systemctl disable --now clover-bootmanager
+			win=$(windows_boot_entry_id) \
+				|| die "could not identify one Windows firmware entry on the detected ESP"
+			efibootmgr -n "$win" &> /dev/null \
+				|| die "firmware rejected Windows as the next boot; Clover remains enabled"
+			systemctl disable --now clover-bootmanager \
+				|| die "could not disable the Clover service"
 			echo "clover service disabled - Windows will boot next"
 			;;
 		enable)
@@ -439,9 +964,19 @@ service)
 protect-windows-efi)
 	protect_windows_efi
 	;;
+restore-windows-efi)
+	restore_windows_efi
+	;;
 install-clover-loader)
 	[ -n "${1:-}" ] || die "usage: clover-ctl install-clover-loader <source>"
 	install_clover_loader "$1"
+	;;
+restore-clover-loader)
+	[ -n "${1:-}" ] || die "usage: clover-ctl restore-clover-loader <source>"
+	restore_clover_loader "$1"
+	;;
+repair-boot-priority)
+	repair_boot_priority "${1:-}"
 	;;
 install-decky)
 	need_root
@@ -486,23 +1021,24 @@ with zipfile.ZipFile('$tmp/p.zip') as z:
 	;;
 diagnostics)
 	need_root
-	user=${SUDO_USER:-$(id -un 1000 2> /dev/null || echo "$USER")}
-	home=$(getent passwd "$user" | cut -d: -f6)
-	[ -n "$home" ] || home="$HOME"
-	out="$home/clover-report-$(date +%Y%m%d-%H%M%S).txt"
-	{
-		echo "# Clover diagnostics - $(date)"
-		echo; echo "## OS"; grep -E 'PRETTY_NAME|VERSION_ID|BUILD_ID' /etc/os-release 2> /dev/null
-		echo; echo "## Device (DMI)"
-		for f in sys_vendor product_name board_name; do echo "$f: $(cat /sys/class/dmi/id/$f 2> /dev/null)"; done
-		echo; echo "## clover-ctl status"; "$0" status 2>&1
-		echo; echo "## EFI boot entries"; efibootmgr 2>&1 | grep -iv 'Boot2\|PXE'
-		echo; echo "## config.plist"; grep -A1 -E 'ScreenResolution|<key>Theme|<key>Timeout|DefaultLoader|DefaultVolume' "$CONFIG" 2> /dev/null
-		echo; echo "## boot-manager status"; cat "$home/1Clover-tools/status.txt" 2> /dev/null
-		echo; echo "## service log"; journalctl -u clover-bootmanager -n 40 --no-pager 2> /dev/null
-	} > "$out" 2>&1
+	need_reporter
+	IFS='|' read -r user home <<EOF
+$(report_user_home)
+EOF
+	out=${CLOVER_REPORT_OUTPUT:-$home/clover-report-$(date +%Y%m%d-%H%M%S).json}
+	python3 "$REPORTER" --ctl "$0" --discovery "$DISCOVERY" --output "$out" \
+		--home "$home" --user "$user" --category system > /dev/null || die "could not create the structured support report"
 	chown "$user":"$user" "$out" 2> /dev/null || true
 	echo "$out"
+	;;
+maintenance-log)
+	log_user=${SUDO_USER:-$(id -un)}
+	log_home=$(getent passwd "$log_user" 2> /dev/null | cut -d: -f6)
+	[ -n "$log_home" ] || log_home=${HOME:-}
+	log_path=${CLOVER_STATUS:-${log_home:+$log_home/1Clover-tools/status.txt}}
+	[ -n "$log_path" ] && [ -r "$log_path" ] \
+		|| die "Clover maintenance log is not available"
+	tail -n 200 "$log_path"
 	;;
 set-batocera)
 	need_root
@@ -545,22 +1081,21 @@ uninstall)
 	home=$(getent passwd "${SUDO_USER:-$(id -un 1000 2> /dev/null)}" | cut -d: -f6)
 	[ -n "$home" ] || home="$HOME"
 	systemctl disable --now clover-bootmanager.service &> /dev/null || true
-	if [ -f "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" ]
+	ensure_windows_efi_mounted || true
+	if [ -f "$WINDOWS_EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" ]
 	then
-		acquire_lock "$EFI_PATH/Microsoft/.clover-efi.lock"
-		verified_publish "$EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$EFI_PATH/Microsoft/Boot/bootmgfw.efi" \
+		acquire_lock "$WINDOWS_EFI_PATH/Microsoft/.clover-efi.lock"
+		verified_publish "$WINDOWS_EFI_PATH/Microsoft/Boot/bootmgfw.efi.orig" "$WINDOWS_EFI_PATH/Microsoft/Boot/bootmgfw.efi" \
 			|| die "could not restore and verify the Windows EFI loader - uninstall aborted"
-		rm -f "$EFI_PATH/Microsoft/bootmgfw.efi"
+		rm -f "$WINDOWS_EFI_PATH/Microsoft/bootmgfw.efi"
 		release_lock
 	fi
-	if [ -f "$BOOTX64.orig" ]
+	if [ -f "$BOOTX64.orig" ] || [ -f "$BOOTX64.clover-no-original" ]
 	then
-		acquire_lock "$EFI_PATH/.clover-efi.lock"
-		verified_publish "$BOOTX64.orig" "$BOOTX64" \
-			|| die "could not restore and verify the original BOOTX64 loader - uninstall aborted"
-		release_lock
+		restore_clover_loader "$EFI_PATH/clover/cloverx64.efi" \
+			|| die "could not restore BOOTX64 - uninstall aborted"
 	fi
-	rm -rf "$EFI_PATH/clover"
+	rm -rf "$EFI_PATH/clover" "$EFI_PATH/clover.previous" "$EFI_PATH/clover.installing"
 	rm -f "$EFI_PATH/steamos/steamos.png"
 	for e in $(efibootmgr 2> /dev/null | grep "Clover - GUI" | colrm 9 | colrm 1 4)
 	do
@@ -609,6 +1144,8 @@ help|--help|-h)
 	cat <<'USAGE'
 clover-ctl <command> [args]
   status                                            current config + state as JSON
+  maintenance-log                                  show the latest local maintenance log
+  boot-layout [--mount-unmounted]                   inspect disks, EFI loaders and firmware entries as JSON
   get <resolution|theme|timeout|default-os>         read one value
   list-themes                                       installed Clover themes
   list-remote-themes                                themes available in the CloverThemes repo
@@ -620,9 +1157,13 @@ clover-ctl <command> [args]
   set-theme <name>                                  (root)
   set-timeout <seconds>                             (root)
   set-default-os <windows|steamos|bazzite|lastos>   (root)
+  set-default-loader <\EFI\path\loader.efi>          (root) use an already discovered EFI loader
   service <enable|disable>                          (root) enable Clover, or hand next boot to Windows
   protect-windows-efi                              (root) verify/refresh the Windows backup, then disable its canonical loader
+  restore-windows-efi                              (root) restore Windows from its verified EFI backup
   install-clover-loader <source>                   (root) verify backup and atomically publish Clover as BOOTX64
+  restore-clover-loader <source>                   (root) restore the original BOOTX64 state after verifying Clover
+  repair-boot-priority [--allow-generic]           (root) register Clover and preserve the complete Clover-first BootOrder
   install-decky                                     (root) install/update the Decky (Game Mode) plugin
   diagnostics                                       (root) write a bug-report bundle to your home folder
   set-batocera <v38|v39>                            (root) point the Batocera entry at the right loader

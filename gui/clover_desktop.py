@@ -17,8 +17,10 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
     QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton,
-    QScrollArea, QStackedWidget, QStyle, QVBoxLayout, QWidget,
+    QScrollArea, QStackedWidget, QStyle, QTextEdit, QVBoxLayout, QWidget,
 )
+
+from boot_options import build_boot_options
 
 
 def find_ctl():
@@ -83,7 +85,12 @@ STRINGS = {
         "row_os": "SO", "row_installed": "Clover instalado", "row_default_boot": "Arranque por defecto",
         "row_service": "Servicio", "row_resolution": "Resolución", "row_theme": "Tema",
         "row_timeout": "Tiempo de espera (s)", "row_windows_active": "Windows activo",
+        "row_loader": "Cargador Linux", "row_target": "ESP de Clover",
+        "row_clover_mode": "Estado de Clover", "row_priority": "Clover primero",
+        "row_problems": "Problemas detectados",
         "btn_refresh": "Actualizar", "btn_save_report": "Guardar informe de fallo",
+        "btn_view_log": "Ver último registro",
+        "btn_repair_boot": "Reparar prioridad de arranque",
         "lbl_default_os": "SO de arranque por defecto", "lbl_quick_actions": "Acciones rápidas",
         "btn_boot_windows": "Arrancar en Windows la próxima vez", "btn_reenable_clover": "Reactivar Clover",
         "lbl_resolution": "Resolución de pantalla", "lbl_timeout": "Tiempo del menú de arranque (s)",
@@ -133,10 +140,15 @@ STRINGS = {
         "confirm_boot_windows": "¿Pasar el próximo arranque a Windows y desactivar el servicio de Clover?",
         "ok_boot_windows": "El próximo arranque irá a Windows.",
         "ok_clover_enabled": "Servicio de Clover reactivado.",
+        "confirm_repair_boot": "Se registrará Clover si falta y se moverá al primer puesto conservando todas las entradas UEFI. ¿Continuar?",
+        "ok_repair_boot": "Prioridad de arranque reparada y verificada.",
+        "opt_unvalidated": "no validado",
         "decky_installed": "Plugin de Decky instalado.",
         "decky_failed": "No se pudo instalar el plugin de Decky.",
         "report_saved": "Informe de fallo guardado en:\n{path}",
         "report_failed": "No se pudo escribir el informe.",
+        "maintenance_log_title": "Último mantenimiento de Clover",
+        "maintenance_log_empty": "Todavía no hay un registro de mantenimiento disponible.",
         "ok_logo": "Logo de arranque actualizado.", "ok_logo_reset": "Logo de arranque restaurado por defecto.",
         "ok_batocera": "Configuración de Batocera fijada a {value}.",
         "uninstall_title": "Desinstalar Clover",
@@ -157,7 +169,12 @@ STRINGS = {
         "row_os": "OS", "row_installed": "Clover installed", "row_default_boot": "Default boot",
         "row_service": "Service", "row_resolution": "Resolution", "row_theme": "Theme",
         "row_timeout": "Timeout (s)", "row_windows_active": "Windows active",
+        "row_loader": "Linux loader", "row_target": "Clover ESP",
+        "row_clover_mode": "Clover state", "row_priority": "Clover first",
+        "row_problems": "Detected problems",
         "btn_refresh": "Refresh", "btn_save_report": "Save bug report",
+        "btn_view_log": "View latest log",
+        "btn_repair_boot": "Repair boot priority",
         "lbl_default_os": "Default boot OS", "lbl_quick_actions": "Quick actions",
         "btn_boot_windows": "Boot to Windows next", "btn_reenable_clover": "Re-enable Clover",
         "lbl_resolution": "Screen resolution", "lbl_timeout": "Boot menu timeout (s)",
@@ -207,10 +224,15 @@ STRINGS = {
         "confirm_boot_windows": "Hand the next boot to Windows and disable the Clover service?",
         "ok_boot_windows": "Next boot will go to Windows.",
         "ok_clover_enabled": "Clover service re-enabled.",
+        "confirm_repair_boot": "Clover will be registered if missing and moved first while preserving every UEFI entry. Continue?",
+        "ok_repair_boot": "Boot priority repaired and verified.",
+        "opt_unvalidated": "unvalidated",
         "decky_installed": "Decky plugin installed.",
         "decky_failed": "Could not install the Decky plugin.",
         "report_saved": "Bug report saved to:\n{path}",
         "report_failed": "Could not write the report.",
+        "maintenance_log_title": "Latest Clover maintenance",
+        "maintenance_log_empty": "No maintenance log is available yet.",
         "ok_logo": "Boot logo updated.", "ok_logo_reset": "Boot logo restored to default.",
         "ok_batocera": "Batocera config set to {value}.",
         "uninstall_title": "Uninstall Clover",
@@ -287,7 +309,7 @@ class Engine:
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
 
     def status(self, parent):
-        rc, out, _ = self.run(["status"], parent)
+        rc, out, _ = self.run(["status"], parent, root=False)
         if rc != 0:
             return None
         try:
@@ -339,8 +361,12 @@ class CloverWindow(QMainWindow):
 
     def _build(self):
         self.setWindowTitle(self.t("window_title"))
-        self.default_os = [("Windows", "windows"), ("SteamOS", "steamos"),
-                           ("Bazzite", "bazzite"), (self.t("opt_lastused"), "lastos")]
+        self.default_os = [
+            {"id": "windows", "label": "Windows", "command": ["set-default-os", "windows"]},
+            {"id": "steamos", "label": "SteamOS", "command": ["set-default-os", "steamos"]},
+            {"id": "bazzite", "label": "Bazzite", "command": ["set-default-os", "bazzite"]},
+            {"id": "lastos", "label": self.t("opt_lastused"), "command": ["set-default-os", "lastos"]},
+        ]
         self.res_presets = [self.t("opt_autodetect"), "1280x800", "1920x1080",
                             "1920x1200", "2560x1600"]
 
@@ -431,6 +457,9 @@ class CloverWindow(QMainWindow):
         self.status_fields = {}
         rows = [("row_os", "os"), ("row_installed", "installed"),
                 ("row_default_boot", "default_os"), ("row_service", "service"),
+                ("row_loader", "loader_kind"), ("row_target", "target_device"),
+                ("row_clover_mode", "clover_status"), ("row_priority", "clover_first"),
+                ("row_problems", "layout_problems"),
                 ("row_resolution", "resolution"), ("row_theme", "theme"),
                 ("row_timeout", "timeout"), ("row_windows_active", "windows_active")]
         for i, (label_key, key) in enumerate(rows):
@@ -445,23 +474,33 @@ class CloverWindow(QMainWindow):
         card_layout.addLayout(grid)
         v.addWidget(card)
         v.addStretch(1)
-        row = QHBoxLayout()
+        actions = QGridLayout()
         refresh = QPushButton(self._icon("view-refresh", QStyle.StandardPixmap.SP_BrowserReload), self.t("btn_refresh"))
         refresh.clicked.connect(self.refresh)
         report = QPushButton(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton), self.t("btn_save_report"))
         report.clicked.connect(self.save_report)
-        row.addWidget(refresh)
-        row.addWidget(report)
-        row.addStretch(1)
-        v.addLayout(row)
+        view_log = QPushButton(self.t("btn_view_log"))
+        view_log.clicked.connect(self.view_maintenance_log)
+        self.repair_button = QPushButton(
+            self._icon("system-run", QStyle.StandardPixmap.SP_BrowserReload),
+            self.t("btn_repair_boot"),
+        )
+        self.repair_button.clicked.connect(self.repair_boot_priority)
+        actions.addWidget(refresh, 0, 0)
+        actions.addWidget(self.repair_button, 0, 1)
+        actions.addWidget(report, 1, 0)
+        actions.addWidget(view_log, 1, 1)
+        actions.setColumnStretch(0, 1)
+        actions.setColumnStretch(1, 1)
+        v.addLayout(actions)
         return page
 
     def _boot_page(self):
         page, v = self._page(self.t("hdr_boot"))
         form = QFormLayout()
         self.default_combo = QComboBox()
-        for label, _ in self.default_os:
-            self.default_combo.addItem(label)
+        for option in self.default_os:
+            self.default_combo.addItem(option["label"])
         form.addRow(self.t("lbl_default_os"), self._apply_row(self.default_combo, self.apply_default_os))
         v.addLayout(form)
         v.addSpacing(12)
@@ -584,16 +623,37 @@ class CloverWindow(QMainWindow):
         if not st:
             self.statusBar().showMessage(self.t("status_unreadable"))
             return
+        self._status = st
         self._theme_limit = st.get("theme_limit", THEME_LIMIT)
         self._theme_count = st.get("theme_count", 0)
         for key, lbl in self.status_fields.items():
-            lbl.setText(str(st.get(key, "—")))
+            value = st.get(key, "—")
+            if key == "layout_problems":
+                value = ", ".join(value) if value else "—"
+                lbl.setWordWrap(True)
+            lbl.setText(str(value))
         self._tint(self.status_fields.get("service"), st.get("service") == "enabled")
         self._tint(self.status_fields.get("windows_active"), str(st.get("windows_active")).lower() != "true")
+        self._tint(self.status_fields.get("clover_first"), st.get("clover_first") is True)
+        self.repair_button.setEnabled(
+            bool(st.get("repair_needed")) and bool(st.get("layout_safe"))
+        )
         self._select(self.res_combo, st.get("resolution"))
         self._select(self.timeout_combo, st.get("timeout"))
-        for i, (_, value) in enumerate(self.default_os):
-            if value == st.get("default_os"):
+        dynamic_options = build_boot_options(
+            st,
+            last_used_label=self.t("opt_lastused"),
+            unvalidated_label=self.t("opt_unvalidated"),
+        )
+        if dynamic_options:
+            self.default_os = dynamic_options
+            self.default_combo.blockSignals(True)
+            self.default_combo.clear()
+            for option in self.default_os:
+                self.default_combo.addItem(option["label"])
+            self.default_combo.blockSignals(False)
+        for i, option in enumerate(self.default_os):
+            if option["id"] == st.get("default_os"):
                 self.default_combo.setCurrentIndex(i)
         themes = self.engine.themes(self)
         self._installed_themes = themes
@@ -687,8 +747,20 @@ class CloverWindow(QMainWindow):
             QMessageBox.warning(self, "Clover", err or out or self.t("cmd_failed"))
 
     def apply_default_os(self):
-        value = self.default_os[self.default_combo.currentIndex()][1]
-        self._apply(["set-default-os", value], self.t("ok_default_os", value=value))
+        index = self.default_combo.currentIndex()
+        if index < 0 or index >= len(self.default_os):
+            return
+        option = self.default_os[index]
+        self._apply(option["command"], self.t("ok_default_os", value=option["label"]))
+
+    def repair_boot_priority(self):
+        if QMessageBox.question(self, "Clover", self.t("confirm_repair_boot")) \
+                != QMessageBox.StandardButton.Yes:
+            return
+        args = ["repair-boot-priority"]
+        if getattr(self, "_status", {}).get("layout_requires_confirmation"):
+            args.append("--allow-generic")
+        self._apply(args, self.t("ok_repair_boot"))
 
     def apply_resolution(self):
         text = self.res_combo.currentText().strip()
@@ -814,6 +886,21 @@ class CloverWindow(QMainWindow):
             QMessageBox.information(self, "Clover", self.t("report_saved", path=out))
         elif err != "cancelled":
             QMessageBox.warning(self, "Clover", err or out or self.t("report_failed"))
+
+    def view_maintenance_log(self):
+        rc, out, _ = self.engine.run(["maintenance-log"], self, root=False)
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self.t("maintenance_log_title"))
+        dialog.resize(640, 440)
+        layout = QVBoxLayout(dialog)
+        contents = QTextEdit()
+        contents.setReadOnly(True)
+        contents.setPlainText(out if rc == 0 and out else self.t("maintenance_log_empty"))
+        layout.addWidget(contents)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
 
     def apply_logo(self):
         if self.logo_combo.currentText():
