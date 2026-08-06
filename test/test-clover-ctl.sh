@@ -472,6 +472,25 @@ report_path=$(CLOVER_REPORTER="$FAKE_REPORTER" CLOVER_REPORT_OUTPUT="$REPORT_OUT
 expect "diagnostics uses the structured reporter" "$report_path" "$REPORT_OUTPUT"
 expect "structured diagnostic file was created" "$([ -f "$REPORT_OUTPUT" ] && echo yes || echo no)" "yes"
 
+DECKY_TEST="$BOOT_TEST/decky-install"
+DECKY_HOME="$DECKY_TEST/home"
+DECKY_BIN="$DECKY_TEST/bin"
+DECKY_SOURCE="$DECKY_HOME/1Clover-tools/decky"
+mkdir -p "$DECKY_HOME/homebrew/plugins" "$DECKY_SOURCE/dist" "$DECKY_BIN"
+cp "$DIR/decky/plugin.json" "$DIR/decky/main.py" "$DIR/decky/package.json" "$DECKY_SOURCE/"
+cp "$DIR/decky/dist/index.js" "$DECKY_SOURCE/dist/"
+cat > "$DECKY_BIN/getent" <<'EOF'
+#!/bin/sh
+printf 'tester:x:1000:1000::%s:/bin/sh\n' "$CLOVER_TEST_DECKY_HOME"
+EOF
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$DECKY_BIN/chown"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$DECKY_BIN/systemctl"
+chmod +x "$DECKY_BIN/getent" "$DECKY_BIN/chown" "$DECKY_BIN/systemctl"
+CLOVER_TEST_DECKY_HOME="$DECKY_HOME" SUDO_USER=tester PATH="$DECKY_BIN:$PATH" \
+	bash "$CTL" install-decky > /dev/null 2>&1
+expect "Decky install includes the package metadata required for module loading" \
+	"$([ -f "$DECKY_HOME/homebrew/plugins/Clover Dual Boot/package.json" ] && echo yes || echo no)" "yes"
+
 rm -rf "$EFI" "$FAKEBIN" "$BOOT_TEST"
 rm -f "$TMP" "$TMP.cloverctl.tmp"
 echo "---"

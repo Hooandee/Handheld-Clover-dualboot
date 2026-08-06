@@ -1064,7 +1064,7 @@ with zipfile.ZipFile('$tmp/p.zip') as z:
 		{ [ -n "$src" ] && [ -f "$src/dist/index.js" ]; } || { rm -rf "$tmp"; die "no built plugin available - run 'cd decky && pnpm build', or check your connection"; }
 	fi
 	mkdir -p "$dest/dist"
-	cp "$src/plugin.json" "$src/main.py" "$dest/" && cp "$src/dist/index.js" "$dest/dist/" || { [ -n "$tmp" ] && rm -rf "$tmp"; die "failed to copy plugin into $dest"; }
+	cp "$src/plugin.json" "$src/package.json" "$src/main.py" "$dest/" && cp "$src/dist/index.js" "$dest/dist/" || { [ -n "$tmp" ] && rm -rf "$tmp"; die "failed to copy plugin into $dest"; }
 	chown -R "$user":"$user" "$dest" 2> /dev/null || true
 	[ -n "$tmp" ] && rm -rf "$tmp"
 	systemctl restart plugin_loader 2> /dev/null && echo "Decky restarted." || echo "Installed - reload Decky to see it."
