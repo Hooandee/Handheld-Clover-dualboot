@@ -5,7 +5,7 @@
   "api_version": 1,
   "publish": {
     "tags": ["system", "boot", "dualboot"],
-    "description": "Configure Clover dual boot from Game Mode - default OS, resolution, theme, timeout, and hand the next boot to Windows.",
+    "description": "Configure and repair Clover dual boot from Game Mode across SteamOS, Bazzite, CachyOS, Windows, and detected Linux loaders.",
     "image": ""
   }
 }

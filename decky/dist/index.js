@@ -85,8 +85,11 @@ function FaHdd (props) {
 }
 
 const getStatus = callable("get_status");
+const getMaintenanceLog = callable("get_maintenance_log");
 const listThemes = callable("list_themes");
 const setDefaultOs = callable("set_default_os");
+const setDefaultLoader = callable("set_default_loader");
+const repairBootPriority = callable("repair_boot_priority");
 const setResolution = callable("set_resolution");
 const setTheme = callable("set_theme");
 const setTimeoutSecs = callable("set_timeout");
@@ -107,6 +110,15 @@ const STRINGS = {
         boot_control: "Control de arranque",
         boot_windows: "Arrancar en Windows la próxima vez",
         reenable: "Reactivar Clover",
+        loader: "Cargador Linux",
+        clover_state: "Estado de Clover",
+        clover_first: "Clover primero",
+        repair: "Reparar prioridad de arranque",
+        problems: "Problemas detectados",
+        result: "Resultado",
+        latest_log: "Último registro",
+        view_log: "Ver último registro",
+        unvalidated: "no validado",
         lastused: "Última usada",
         autodetect: "Detección automática",
     },
@@ -123,6 +135,15 @@ const STRINGS = {
         boot_control: "Boot control",
         boot_windows: "Boot to Windows next",
         reenable: "Re-enable Clover",
+        loader: "Linux loader",
+        clover_state: "Clover state",
+        clover_first: "Clover first",
+        repair: "Repair boot priority",
+        problems: "Detected problems",
+        result: "Result",
+        latest_log: "Latest log",
+        view_log: "View latest log",
+        unvalidated: "unvalidated",
         lastused: "Last used",
         autodetect: "Auto-detect",
     },
@@ -131,9 +152,16 @@ function Content() {
     const [status, setStatus] = SP_REACT.useState(null);
     const [themes, setThemes] = SP_REACT.useState([]);
     const [lang, setLangState] = SP_REACT.useState("es");
+    const [actionMessage, setActionMessage] = SP_REACT.useState("");
+    const [maintenanceLog, setMaintenanceLog] = SP_REACT.useState("");
     const t = (key) => (STRINGS[lang] ?? STRINGS.en)[key] ?? STRINGS.en[key] ?? key;
     const refresh = async () => {
         setStatus(await getStatus());
+    };
+    const applyAction = async (action) => {
+        const result = await action;
+        setActionMessage(`${result.ok ? "✓" : "⚠"} ${result.message}`);
+        await refresh();
     };
     SP_REACT.useEffect(() => {
         refresh();
@@ -144,39 +172,53 @@ function Content() {
         { data: "es", label: "Español" },
         { data: "en", label: "English" },
     ];
-    const osOptions = [
-        { data: "windows", label: "Windows" },
-        { data: "steamos", label: "SteamOS" },
-        { data: "bazzite", label: "Bazzite" },
-        { data: "lastos", label: t("lastused") },
+    const availableOs = status?.available_os ?? [
+        { id: "windows", label: "Windows" },
+        { id: "steamos", label: "SteamOS" },
+        { id: "bazzite", label: "Bazzite" },
+        { id: "lastos", label: t("lastused") },
     ];
+    const osOptions = availableOs.map((entry) => ({
+        data: entry.id,
+        label: entry.id === "lastos"
+            ? t("lastused")
+            : `${entry.label}${entry.validated === false ? ` (${t("unvalidated")})` : ""}`,
+    }));
     const resOptions = ["auto", "1280x800", "1920x1080", "1920x1200", "2560x1600"].map((r) => ({
         data: r,
         label: r === "auto" ? t("autodetect") : r,
     }));
     const timeoutOptions = [1, 5, 10, 15, 60].map((s) => ({ data: s, label: `${s}s` }));
     return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSection, { title: t("language"), children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { rgOptions: langOptions, selectedOption: lang, onChange: async (o) => {
-                            await setLang(o.data);
-                            setLangState(o.data);
-                        } }) }) }), SP_JSX.jsxs(DFL.PanelSection, { title: t("status"), children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("default_boot"), children: status?.default_os ?? "..." }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("resolution"), children: status?.resolution ?? "..." }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("theme"), children: status?.theme ?? "..." }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("service"), children: status?.service ?? "..." }) })] }), SP_JSX.jsx(DFL.PanelSection, { title: t("default_boot_os"), children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { rgOptions: osOptions, selectedOption: status?.default_os, onChange: async (o) => {
-                            await setDefaultOs(o.data);
-                            refresh();
+                            const result = await setLang(o.data);
+                            if (result.ok)
+                                setLangState(o.data);
+                        } }) }) }), SP_JSX.jsxs(DFL.PanelSection, { title: t("status"), children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("default_boot"), children: status?.default_os ?? "..." }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("resolution"), children: status?.resolution ?? "..." }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("theme"), children: status?.theme ?? "..." }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("service"), children: status?.service ?? "..." }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("loader"), children: status?.loader_kind ?? "..." }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("clover_state"), children: status?.clover_status ?? "..." }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("clover_first"), children: status?.clover_first === true ? "✓" : "—" }) }), (status?.layout_problems?.length ?? 0) > 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("problems"), children: status?.layout_problems?.join(", ") }) })), (status?.error || actionMessage) && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("result"), children: status?.error || actionMessage }) }))] }), SP_JSX.jsx(DFL.PanelSection, { title: t("default_boot_os"), children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { rgOptions: osOptions, selectedOption: status?.default_os, onChange: async (o) => {
+                            const selected = availableOs.find((entry) => entry.id === o.data);
+                            if (selected?.loader) {
+                                await applyAction(setDefaultLoader(selected.loader));
+                            }
+                            else {
+                                await applyAction(setDefaultOs(o.data));
+                            }
                         } }) }) }), SP_JSX.jsx(DFL.PanelSection, { title: t("display"), children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { rgOptions: resOptions, selectedOption: status?.resolution, onChange: async (o) => {
-                            await setResolution(o.data);
-                            refresh();
+                            await applyAction(setResolution(o.data));
                         } }) }) }), SP_JSX.jsx(DFL.PanelSection, { title: t("theme"), children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { rgOptions: themes.map((th) => ({ data: th, label: th })), selectedOption: status?.theme, onChange: async (o) => {
-                            await setTheme(o.data);
-                            refresh();
+                            await applyAction(setTheme(o.data));
                         } }) }) }), SP_JSX.jsx(DFL.PanelSection, { title: t("boot_timeout"), children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { rgOptions: timeoutOptions, selectedOption: status?.timeout ? parseInt(status.timeout, 10) : undefined, onChange: async (o) => {
-                            await setTimeoutSecs(o.data);
-                            refresh();
-                        } }) }) }), SP_JSX.jsxs(DFL.PanelSection, { title: t("boot_control"), children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: async () => {
-                                await setService("disable");
-                                refresh();
+                            await applyAction(setTimeoutSecs(o.data));
+                        } }) }) }), SP_JSX.jsxs(DFL.PanelSection, { title: t("boot_control"), children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: !status?.repair_needed || !status?.layout_safe, onClick: async () => {
+                                await applyAction(repairBootPriority(status?.layout_requires_confirmation === true));
+                            }, children: t("repair") }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: async () => {
+                                await applyAction(setService("disable"));
                             }, children: t("boot_windows") }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: async () => {
-                                await setService("enable");
-                                refresh();
-                            }, children: t("reenable") }) })] })] }));
+                                await applyAction(setService("enable"));
+                            }, children: t("reenable") }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: async () => {
+                                const result = await getMaintenanceLog();
+                                setMaintenanceLog(result.message);
+                                if (!result.ok)
+                                    setActionMessage(`⚠ ${result.message}`);
+                            }, children: t("view_log") }) }), maintenanceLog && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: t("latest_log"), children: maintenanceLog }) }))] })] }));
 }
 var index = definePlugin(() => ({
     name: "Clover Dual Boot",

@@ -203,15 +203,51 @@
 				</dict>
 				<dict>
 					<key>Image</key>
-					<string>os_ubuntu</string>
+					<string>os_arch</string>
 					<key>Path</key>
-					<string>\efi\systemd\systemd-bootx64.efi</string>
+					<string>\efi\limine\limine_x64.efi</string>
 					<key>Title</key>
-					<string>Pop!_ OS</string>
+					<string>CachyOS</string>
 					<key>Type</key>
 					<string>Linux</string>
 					<key>FullTitle</key>
-					<string>Pop!_OS by System76</string>
+					<string>CachyOS (Limine)</string>
+				</dict>
+				<dict>
+					<key>Image</key>
+					<string>os_arch</string>
+					<key>Path</key>
+					<string>\efi\cachyos\grubx64.efi</string>
+					<key>Title</key>
+					<string>CachyOS</string>
+					<key>Type</key>
+					<string>Linux</string>
+					<key>FullTitle</key>
+					<string>CachyOS (GRUB)</string>
+				</dict>
+				<dict>
+					<key>Image</key>
+					<string>os_arch</string>
+					<key>Path</key>
+					<string>\efi\refind\refind_x64.efi</string>
+					<key>Title</key>
+					<string>CachyOS</string>
+					<key>Type</key>
+					<string>Linux</string>
+					<key>FullTitle</key>
+					<string>CachyOS (rEFInd)</string>
+				</dict>
+				<dict>
+					<key>Image</key>
+					<string>os_linux</string>
+					<key>Path</key>
+					<string>\efi\systemd\systemd-bootx64.efi</string>
+					<key>Title</key>
+					<string>Linux</string>
+					<key>Type</key>
+					<string>Linux</string>
+					<key>FullTitle</key>
+					<string>Linux (systemd-boot)</string>
 				</dict>
 			</array>
 		</dict>

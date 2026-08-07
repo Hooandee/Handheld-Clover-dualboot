@@ -32,7 +32,7 @@ jobs:
       - name: Package plugin
         run: |
           mkdir -p "out/Clover Dual Boot/dist"
-          cp plugin.json main.py "out/Clover Dual Boot/"
+          cp plugin.json package.json main.py "out/Clover Dual Boot/"
           cp dist/index.js "out/Clover Dual Boot/dist/"
           cd out && zip -r ../clover-dualboot-decky.zip "Clover Dual Boot"
       - uses: actions/upload-artifact@v4
