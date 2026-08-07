@@ -401,6 +401,21 @@ dynamic_default=$(env -u CLOVER_EFI_PATH -u CLOVER_CONFIG \
 	PATH="$BOOT_BIN:$PATH" bash "$CTL" get default-os)
 expect "controller resolves config from discovered ESP" "$dynamic_default" "steamos"
 
+env -u CLOVER_EFI_PATH -u CLOVER_CONFIG \
+	CLOVER_OS_RELEASE_PATH="$BOOT_TEST/os-release" \
+	CLOVER_DISCOVERY="$DIR/custom/boot-discovery.py" \
+	PATH="$BOOT_BIN:$PATH" bash "$CTL" set-default-os lastos > /dev/null
+last_used_status=$(env -u CLOVER_EFI_PATH -u CLOVER_CONFIG \
+	CLOVER_OS_RELEASE_PATH="$BOOT_TEST/os-release" \
+	CLOVER_DISCOVERY="$DIR/custom/boot-discovery.py" \
+	CLOVER_EFIBOOT_STATE="$BOOT_STATE" \
+	CLOVER_EFIBOOT_CALLS="$BOOT_CALLS" \
+	PATH="$BOOT_BIN:$PATH" bash "$CTL" status)
+case "$last_used_status" in
+	*'"default_os":"lastos"'*) expect "status preserves the configured last-used policy" yes yes ;;
+	*) expect "status preserves the configured last-used policy" "$last_used_status" '"default_os":"lastos"' ;;
+esac
+
 WINDOWS_MOUNT_TEST="$BOOT_TEST/windows-mount"
 WINDOWS_MOUNT_LOG="$BOOT_TEST/windows-mount.log"
 WINDOWS_DISCOVERY="$BOOT_TEST/windows-discovery.py"

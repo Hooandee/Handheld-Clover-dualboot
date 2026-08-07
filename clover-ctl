@@ -776,7 +776,7 @@ base.update({
     "layout_requires_confirmation": layout.get("requires_confirmation", False),
     "layout_problems": layout.get("problems") or [],
 })
-if loader and configured_loader.casefold() == str(loader.get("path", "")).casefold():
+if base.get("default_os") != "lastos" and loader and configured_loader.casefold() == str(loader.get("path", "")).casefold():
     base["default_os"] = host.get("profile", "linux")
 available = []
 if windows:
