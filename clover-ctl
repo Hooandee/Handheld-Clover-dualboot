@@ -21,6 +21,9 @@ detect_os() {
 	elif grep -qi steamos /etc/os-release 2> /dev/null
 	then
 		OS=SteamOS; EFI_PATH=/esp/efi; BOOTX64=$EFI_PATH/boot/bootx64.efi
+	elif grep -qi cachyos /etc/os-release 2> /dev/null
+	then
+		OS=CachyOS; EFI_PATH=/boot/EFI; BOOTX64=$EFI_PATH/BOOT/BOOTX64.EFI
 	else
 		OS=unknown; EFI_PATH=; BOOTX64=
 	fi
@@ -32,7 +35,7 @@ BOOTX64=${CLOVER_BOOTX_PATH:-$BOOTX64}
 CONFIG=${CLOVER_CONFIG:-${EFI_PATH:+$EFI_PATH/clover/config.plist}}
 
 die() { echo "clover-ctl: $1" >&2; exit 1; }
-need_efi() { [ -n "$EFI_PATH" ] || die "not running on SteamOS or Bazzite"; }
+need_efi() { [ -n "$EFI_PATH" ] || die "not running on SteamOS, Bazzite or CachyOS"; }
 valid_theme_name() {
 	case "$1" in ''|.|..|*/*) die "invalid theme name: $1" ;; esac
 	printf '%s\n' "$1" | LC_ALL=C grep -Eq '^[[:alnum:] _.-]+$' \
@@ -222,6 +225,7 @@ default_os_label() {
 		*microsoft*) echo windows ;;
 		*steamcl*) echo steamos ;;
 		*fedora*|*shimx64*) echo bazzite ;;
+		*limine*) echo cachyos ;;
 		*) echo unknown ;;
 	esac
 }
@@ -408,8 +412,9 @@ set-default-os)
 		windows) plist_set_pair DefaultLoader string '\efi\microsoft\bootmgfw.efi' DefaultVolume string esp "$CONFIG" || die "could not update the Clover config" ;;
 		steamos) plist_set_pair DefaultLoader string '\efi\steamos\steamcl.efi' DefaultVolume string esp "$CONFIG" || die "could not update the Clover config" ;;
 		bazzite) plist_set_pair DefaultLoader string '\EFI\FEDORA\shimx64.efi' DefaultVolume string esp "$CONFIG" || die "could not update the Clover config" ;;
+		cachyos) plist_set_pair DefaultLoader string '\EFI\limine\limine_x64.efi' DefaultVolume string esp "$CONFIG" || die "could not update the Clover config" ;;
 		lastos) plist_set DefaultVolume string LastBootedVolume "$CONFIG" || die "could not update the Clover config" ;;
-		*) die "usage: clover-ctl set-default-os <windows|steamos|bazzite|lastos>" ;;
+		*) die "usage: clover-ctl set-default-os <windows|steamos|bazzite|cachyos|lastos>" ;;
 	esac
 	echo "default boot set to $1"
 	;;

@@ -15,7 +15,15 @@ else
 		EFI_PATH=/esp/efi
 		BOOTX64=$EFI_PATH/boot/bootx64.efi
 	else
-		exit
+		grep -i CachyOS /etc/os-release &> /dev/null
+		if [ $? -eq 0 ]
+		then
+			OS=CachyOS
+			EFI_PATH=/boot/EFI
+			BOOTX64=$EFI_PATH/BOOT/BOOTX64.EFI
+		else
+			exit
+		fi
 	fi
 fi
 
@@ -183,6 +191,7 @@ Boot_Choice=$(zenity --width 550 --height 300 --list --radiolist --multiple --ti
 	FALSE Windows "Set Windows as the default OS to boot."\
 	FALSE SteamOS "Set SteamOS as the default OS to boot."\
 	FALSE Bazzite "Set Bazzite as the default OS to boot."\
+	FALSE CachyOS "Set CachyOS as the default OS to boot."\
 	FALSE LastOS "The last OS that was booted will be the default."\
 	TRUE EXIT "***** Exit the Clover Toolbox *****")
 
@@ -212,6 +221,13 @@ Boot_Choice=$(zenity --width 550 --height 300 --list --radiolist --multiple --ti
 		echo -e "$current_password\n" | sudo -S sed -i '/<key>DefaultLoader<\/key>/!b;n;c\\t\t<string>\\EFI\\FEDORA\\shimx64\.efi<\/string>' $EFI_PATH/clover/config.plist
 		echo -e "$current_password\n" | sudo -S sed -i '/<key>DefaultVolume<\/key>/!b;n;c\\t\t<string>esp<\/string>' $EFI_PATH/clover/config.plist
 		zenity --warning --title "Clover Toolbox" --text "SteamOS is now the default boot entry in Clover!" --width 400 --height 75
+
+	elif [ "$Boot_Choice" == "CachyOS" ]
+	then
+		# change the Default Loader in config.plist
+		echo -e "$current_password\n" | sudo -S sed -i '/<key>DefaultLoader<\/key>/!b;n;c\\t\t<string>\\EFI\\limine\\limine_x64\.efi<\/string>' $EFI_PATH/clover/config.plist
+		echo -e "$current_password\n" | sudo -S sed -i '/<key>DefaultVolume<\/key>/!b;n;c\\t\t<string>esp<\/string>' $EFI_PATH/clover/config.plist
+		zenity --warning --title "Clover Toolbox" --text "CachyOS is now the default boot entry in Clover!" --width 400 --height 75
 
 	elif [ "$Boot_Choice" == "LastOS" ]
 	then

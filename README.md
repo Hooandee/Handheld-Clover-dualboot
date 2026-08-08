@@ -1,4 +1,4 @@
-# Clover Dual Boot para portátiles, SteamOS / Bazzite + Windows
+# Clover Dual Boot para portátiles, SteamOS / Bazzite / CachyOS + Windows
 
 > 🇬🇧 Prefer English? Follow the English guide here: [README.en.md](README.en.md)
 
@@ -54,9 +54,9 @@ Hazlo bajo tu propia responsabilidad. Esto se ofrece solo con fines educativos y
 ## Instalación
 
 ### Requisitos, léelos primero
-* **Instala SteamOS / Bazzite _antes_ que Windows.** El instalador no se ejecuta si Windows es el dueño de la partición EFI.
+* **Instala SteamOS / Bazzite / CachyOS _antes_ que Windows.** El instalador no se ejecuta si Windows es el dueño de la partición EFI.
 * **Desactiva el Secure Boot** en la BIOS/UEFI. Es obligatorio en las portátiles que no son Steam Deck (ROG Ally, Legion Go, etc.).
-* **Pon una contraseña de sudo** en SteamOS / Bazzite. El instalador la necesita y se detiene si está en blanco.
+* **Pon una contraseña de sudo** en SteamOS / Bazzite / CachyOS. El instalador la necesita y se detiene si está en blanco.
 
 ### 1. Preparar Windows
 Arranca en Windows, abre un Símbolo del sistema o PowerShell como administrador y ejecuta:
@@ -65,7 +65,7 @@ bcdedit.exe -set "{globalsettings}" highestmode on
 reg add "HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\TimeZoneInformation" /v RealTimeIsUniversal /d 1 /t REG_DWORD /f
 ```
 
-### 2. Instalar en SteamOS / Bazzite
+### 2. Instalar en SteamOS / Bazzite / CachyOS
 Entra en el Modo Escritorio, abre una terminal (Konsole) y pega este comando de una sola línea:
 
 ```bash

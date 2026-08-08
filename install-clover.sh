@@ -86,6 +86,7 @@ msg() {
 		win_disabled_done) es='Había que desactivar la EFI de Windows - hecho.'; en='Windows EFI needs to be disabled - done.' ;;
 		win_already_disabled) es='La EFI de Windows ya está desactivada - no se necesita acción.'; en='Windows EFI is already disabled - no action needed.' ;;
 		win_backup_missing) es='No existe copia de la EFI de Windows.'; en='Windows EFI backup does not exist.' ;;
+		win_skip_own_esp) es='Windows está en su propia partición EFI - no hace falta desactivar su cargador.'; en='Windows lives on its own EFI partition - no need to disable its loader.' ;;
 		win_protect_failed) es='No se pudo proteger la EFI de Windows. La instalación se detiene sin mover su cargador.'; en='Could not protect the Windows EFI. Installation stopped without moving its loader.' ;;
 		clover_installed_ok) es='¡Clover se ha instalado correctamente en la partición EFI del sistema!'; en='Clover has been successfully installed to the EFI system partition!' ;;
 		clover_install_fail) es='Vaya, algo salió mal. Clover no está instalado.'; en='Whoopsie something went wrong. Clover is not installed.' ;;
@@ -222,11 +223,23 @@ else
 		BOOTX64=$EFI_PATH/boot/bootx64.efi
 		msg running_on_os "$OS"
 	else
-		msg neither_os
-		msg exiting_now
-		exit
+		grep -i CachyOS /etc/os-release &> /dev/null
+		if [ $? -eq 0 ]
+		then
+			OS=CachyOS
+			EFI_PATH=/boot/EFI
+			BOOTX64=$EFI_PATH/BOOT/BOOTX64.EFI
+			msg running_on_os "$OS"
+		else
+			msg neither_os
+			msg exiting_now
+			exit
+		fi
 	fi
 fi
+
+# recompute the ESP free-space figure against the detected ESP
+ESP=$(df "$EFI_PATH" --output=avail 2> /dev/null | tail -n1)
 
 # check if  dual boot configuration is supported
 blkid | grep nvme0n1p1\: | grep Microsoft
@@ -396,7 +409,12 @@ do
 done
 
 # install Clover to the EFI system partition
-echo -e "$current_password\n" | sudo -S efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Clover - GUI Boot Manager" -l "$CLOVER_EFI" &> /dev/null
+# locate the disk and partition backing the detected ESP (not always nvme0n1p1)
+ESP_SRC=$(findmnt -no SOURCE --target "$EFI_PATH" 2> /dev/null)
+ESP_DISK=/dev/$(lsblk -no PKNAME "$ESP_SRC" 2> /dev/null)
+ESP_PARTNUM=$(lsblk -no PARTN "$ESP_SRC" 2> /dev/null | tr -d ' ')
+{ [ -b "$ESP_DISK" ] && [ -n "$ESP_PARTNUM" ]; } || { ESP_DISK=/dev/nvme0n1; ESP_PARTNUM=1; }
+echo -e "$current_password\n" | sudo -S efibootmgr -c -d "$ESP_DISK" -p "$ESP_PARTNUM" -L "Clover - GUI Boot Manager" -l "$CLOVER_EFI" &> /dev/null
 
 # create a verified backup and atomically publish Clover as BOOTX64
 if echo -e "$current_password\n" | sudo -S env CLOVER_EFI_PATH="$EFI_PATH" CLOVER_BOOTX_PATH="$BOOTX64" \
@@ -409,7 +427,11 @@ else
 fi
 
 # verify/refresh the Windows backup before disabling its canonical loader
-if echo -e "$current_password\n" | sudo -S env CLOVER_EFI_PATH="$EFI_PATH" ./clover-ctl protect-windows-efi
+# (CachyOS: Windows keeps its own ESP and is chainloaded directly - nothing to disable)
+if [ "$OS" = CachyOS ]
+then
+	msg win_skip_own_esp
+elif echo -e "$current_password\n" | sudo -S env CLOVER_EFI_PATH="$EFI_PATH" ./clover-ctl protect-windows-efi
 then
 	msg win_disabled_done
 else
@@ -483,17 +505,25 @@ then
 	echo -e "$current_password\n" | sudo -S cp custom/clover-whitelist.conf /etc/atomic-update.conf.d
 else
 	msg final_config "$OS"
-	echo -e "$current_password\n" | sudo -S blkid | grep nvme0n1p1 | grep esp &> /dev/null
+	echo -e "$current_password\n" | sudo -S blkid "$ESP_SRC" | grep -i esp &> /dev/null
 	if [ $? -eq 0 ]
 	then
 		msg esp_labeled
 	else
-		echo -e "$current_password\n" | sudo -S fatlabel /dev/nvme0n1p1 esp &> /dev/null
+		echo -e "$current_password\n" | sudo -S fatlabel "$ESP_SRC" esp &> /dev/null
 		msg esp_label_done
 	fi
 
-	# set bazzite as the default boot in Clover config
-	echo -e "$current_password\n" | sudo -S sed -i '/<key>DefaultLoader<\/key>/!b;n;c\\t\t<string>\\efi\\fedora\\shimx64\.efi<\/string>' $EFI_PATH/clover/config.plist
+	if [ "$OS" = CachyOS ]
+	then
+		# set CachyOS (Limine) as the default boot in Clover config
+		echo -e "$current_password\n" | sudo -S sed -i '/<key>DefaultLoader<\/key>/!b;n;c\\t\t<string>\\EFI\\limine\\limine_x64\.efi<\/string>' $EFI_PATH/clover/config.plist
+		# standard dual-boot layout: point the internal Windows entry at its canonical path
+		echo -e "$current_password\n" | sudo -S sed -i 's|<string>\\efi\\microsoft\\bootmgfw\.efi</string>|<string>\\EFI\\Microsoft\\Boot\\bootmgfw.efi</string>|' $EFI_PATH/clover/config.plist
+	else
+		# set bazzite as the default boot in Clover config
+		echo -e "$current_password\n" | sudo -S sed -i '/<key>DefaultLoader<\/key>/!b;n;c\\t\t<string>\\efi\\fedora\\shimx64\.efi<\/string>' $EFI_PATH/clover/config.plist
+	fi
 
 fi
 
