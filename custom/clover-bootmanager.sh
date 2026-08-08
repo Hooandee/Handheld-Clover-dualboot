@@ -36,11 +36,31 @@ else
 		EFI_NAME=\\EFI\\steamos\\steamcl.efi
 		echo Script is running on supported OS - $OS version $OS_Version_SteamOS build $OS_Build > $CloverStatus
 	else
-		echo This is neither Bazzite nor SteamOS! > $CloverStatus
-		echo Exiting immediately! >> $CloverStatus
-		exit
+		grep -i CachyOS /etc/os-release &> /dev/null
+		if [ $? -eq 0 ]
+		then
+			OS=CachyOS
+			EFI_PATH=/boot/EFI
+			EFI_NAME=\\EFI\\limine\\limine_x64.efi
+			echo Script is running on supported OS - $OS $OS_Build > $CloverStatus
+		else
+			echo This is not Bazzite, SteamOS or CachyOS! > $CloverStatus
+			echo Exiting immediately! >> $CloverStatus
+			exit
+		fi
 	fi
 fi
+
+# resolve the disk/partition backing the detected ESP (not always nvme0n1p1)
+ESP_SRC=$(findmnt -no SOURCE --target "$EFI_PATH" 2> /dev/null)
+ESP_DISK=/dev/$(lsblk -no PKNAME "$ESP_SRC" 2> /dev/null)
+ESP_PARTNUM=$(lsblk -no PARTN "$ESP_SRC" 2> /dev/null | tr -d ' ')
+{ [ -b "$ESP_DISK" ] && [ -n "$ESP_PARTNUM" ]; } || { ESP_DISK=/dev/nvme0n1; ESP_PARTNUM=1; }
+ESP_PARTITION=$ESP_SRC
+ESP_MOUNT_POINT=$(findmnt -no TARGET --target "$EFI_PATH" 2> /dev/null)
+ESP_ALLOCATED_SPACE=$(df -h "$EFI_PATH" 2> /dev/null | tail -n1 | tr -s ' ' | cut -d ' ' -f 2)
+ESP_USED_SPACE=$(df -h "$EFI_PATH" 2> /dev/null | tail -n1 | tr -s ' ' | cut -d ' ' -f 3)
+ESP_FREE_SPACE=$(df -h "$EFI_PATH" 2> /dev/null | tail -n1 | tr -s ' ' | cut -d ' ' -f 4)
 
 echo Clover $CLOVER_VERSION Boot Manager - $(date) >> $CloverStatus
 echo Steam Deck Model : $MODEL with  BIOS version $BIOS_VERSION >> $CloverStatus
@@ -65,21 +85,26 @@ then
 	echo Clover EFI entry exists! No need to re-add Clover. >> $CloverStatus
 else
 	echo Clover EFI entry is not found. Need to re-ad Clover. >> $CloverStatus
-	efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Clover - GUI Boot Manager" -l "$CLOVER_EFI" &> /dev/null
+	efibootmgr -c -d "$ESP_DISK" -p "$ESP_PARTNUM" -L "Clover - GUI Boot Manager" -l "$CLOVER_EFI" &> /dev/null
 fi
 
-efibootmgr | grep -i $OS &> /dev/null
+OS_GREP=$OS
+[ "$OS" = CachyOS ] && OS_GREP='Limine\|CachyOS'
+efibootmgr | grep -i "$OS_GREP" &> /dev/null
 if [ $? -eq 0 ]
 then
 	echo $OS EFI entry exists! No need to re-add $OS. >> $CloverStatus
 else
 	echo SteamOS EFI entry is not found. Need to re-add $OS. >> $CloverStatus
-	efibootmgr -c -d /dev/nvme0n1 -p 1 -L "$OS" -l "$EFI_NAME" &> /dev/null
+	efibootmgr -c -d "$ESP_DISK" -p "$ESP_PARTNUM" -L "$OS" -l "$EFI_NAME" &> /dev/null
 fi
 
 # verify/refresh the restorable Windows loader before disabling its canonical path
 CLOVER_CTL=/etc/clover-dualboot/clover-ctl
-if [ -x "$CLOVER_CTL" ] \
+if [ "$OS" = CachyOS ]
+then
+	echo Windows lives on its own ESP - loader protection not needed. >> "$CloverStatus"
+elif [ -x "$CLOVER_CTL" ] \
 	&& CLOVER_EFI_PATH="$EFI_PATH" "$CLOVER_CTL" protect-windows-efi >> "$CloverStatus" 2>&1
 then
 	echo Windows EFI protection verified. >> "$CloverStatus"
@@ -90,7 +115,7 @@ fi
 
 # re-arrange the boot order and make Clover the priority!
 Clover=$(efibootmgr | grep -i Clover | colrm 9 | colrm 1 4)
-OtherOS=$(efibootmgr | grep -i $OS | colrm 9 | colrm 1 4)
+OtherOS=$(efibootmgr | grep -i "$OS_GREP" | head -n1 | colrm 9 | colrm 1 4)
 efibootmgr -o $Clover,$OtherOS &> /dev/null
 
 echo "*** Current state of EFI entries ****" >> $CloverStatus
