@@ -340,7 +340,8 @@ class CloverWindow(QMainWindow):
     def _build(self):
         self.setWindowTitle(self.t("window_title"))
         self.default_os = [("Windows", "windows"), ("SteamOS", "steamos"),
-                           ("Bazzite", "bazzite"), (self.t("opt_lastused"), "lastos")]
+                           ("Bazzite", "bazzite"), ("CachyOS", "cachyos"),
+                           (self.t("opt_lastused"), "lastos")]
         self.res_presets = [self.t("opt_autodetect"), "1280x800", "1920x1080",
                             "1920x1200", "2560x1600"]
 
